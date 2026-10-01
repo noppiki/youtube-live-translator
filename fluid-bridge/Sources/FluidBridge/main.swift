@@ -238,7 +238,9 @@ actor Engine {
                         final: false,
                         utteranceId: utteranceId,
                         startMs: utteranceStartMs,
-                        endMs: endMs
+                        endMs: endMs,
+                        tokenStrings: currentTokens,
+                        tokenTimestampsMs: currentTokenTimes
                     )
                 )
             }
