@@ -766,7 +766,19 @@ function openLocalSocket() {
         return;
       }
       if (data.type === 'utterance') {
-        if (data.final && Array.isArray(data.tokenStrings) && Array.isArray(data.tokenTimestampsMs)) {
+        if (!data.final && Array.isArray(data.tokenStrings) && Array.isArray(data.tokenTimestampsMs)) {
+          const split = emitPartialSpeakerSegments(data);
+          if (!split) {
+            emitUtterance({
+              utteranceId: data.utteranceId,
+              text: data.text || '',
+              sourceLanguage: data.language || settings.sourceLanguage,
+              final: false,
+              startMs: data.startMs,
+              endMs: data.endMs
+            });
+          }
+        } else if (data.final && Array.isArray(data.tokenStrings) && Array.isArray(data.tokenTimestampsMs)) {
           const split = await emitFinalSpeakerSegments(data);
           if (!split) {
             emitUtterance({
