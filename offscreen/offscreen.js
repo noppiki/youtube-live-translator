@@ -43,6 +43,32 @@ const QWEN_LANGUAGES = {
   id: 'Indonesian', ms: 'Malay'
 };
 
+function trimNumericMap(map, maxSize = 160) {
+  if (map.size <= maxSize) return;
+  const keys = [...map.keys()]
+    .filter((key) => Number.isFinite(Number(key)))
+    .sort((a, b) => Number(a) - Number(b));
+  while (map.size > maxSize && keys.length) {
+    map.delete(keys.shift());
+  }
+}
+
+function trimNumericSet(set, maxSize = 160) {
+  if (set.size <= maxSize) return;
+  const values = [...set]
+    .filter((value) => Number.isFinite(Number(value)))
+    .sort((a, b) => Number(a) - Number(b));
+  while (set.size > maxSize && values.length) {
+    set.delete(values.shift());
+  }
+}
+
+function pruneLongRunningState() {
+  trimNumericMap(utteranceTranslationSeq);
+  trimNumericMap(lockedUtteranceSpeakers);
+  trimNumericSet(turnFinalizedIds);
+}
+
 function sendOverlay(type, payload = {}) {
   chrome.runtime.sendMessage({
     target: 'content-relay',
@@ -496,6 +522,7 @@ async function emitUtterance({
       startMs,
       endMs
     });
+    pruneLongRunningState();
   } catch (error) {
     sendOverlay('LT_UTTERANCE', {
       utteranceId: id,
