@@ -26,11 +26,18 @@
   align-items: start;
   gap: 8px;
   max-width: 100%;
-  opacity: 0.8;
+  opacity: 0.62;
+  transform: translateY(0);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+#live-translator-overlay .lt-utterance:nth-last-child(2) {
+  opacity: 0.82;
 }
 
 #live-translator-overlay .lt-utterance:last-child {
   opacity: 1;
+  transform: translateY(1px);
 }
 
 #live-translator-overlay .lt-utterance-speaker {
