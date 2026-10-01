@@ -9,21 +9,56 @@
 <body>
   <main>
     <h1>Live Translator</h1>
-    <p class="lead">YouTube Live の音声をリアルタイム文字起こし → 日本語翻訳します。</p>
+    <p class="lead">YouTube LiveをローカルAIで文字起こしし、Chrome内蔵翻訳で日本語字幕にします。</p>
 
     <label>
-      Deepgram APIキー
-      <input id="apiKey" type="password" autocomplete="off" placeholder="dg_... / project key">
+      音声認識
+      <select id="engineMode">
+        <option value="auto">自動（ローカル優先 → Deepgram）</option>
+        <option value="local">ローカルのみ（無料）</option>
+        <option value="deepgram">Deepgramのみ</option>
+      </select>
     </label>
-    <p class="hint">MVPではキーをこのChromeプロファイルの <code>chrome.storage.local</code> に保存します。公開配布版では短期トークン方式に変えてください。</p>
+
+    <section class="card" id="localCard">
+      <div class="cardTitle">
+        <span>ローカルエンジン</span>
+        <span id="localBadge" class="badge offline">未接続</span>
+      </div>
+
+      <label>
+        ローカルモデル
+        <select id="localModel">
+          <option value="moona3k/mlx-qwen3-asr-0.6b-4bit">Qwen3-ASR 0.6B 4-bit（推奨・約517MB）</option>
+          <option value="moona3k/mlx-qwen3-asr-1.7b-4bit">Qwen3-ASR 1.7B 4-bit（高精度・約1.2GB）</option>
+        </select>
+      </label>
+
+      <div class="row">
+        <button id="testLocal">接続テスト</button>
+        <button id="installModel">モデル準備</button>
+      </div>
+
+      <details>
+        <summary>初回インストール</summary>
+        <p class="hint">Apple Silicon Mac用。下のコマンドをターミナルへ1回貼り付けるだけです。以後は自動起動します。</p>
+        <textarea id="installCommand" readonly rows="3">curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash</textarea>
+        <button id="copyInstall">コマンドをコピー</button>
+      </details>
+    </section>
+
+    <label id="apiKeyLabel">
+      Deepgram APIキー（フォールバック用）
+      <input id="apiKey" type="password" autocomplete="off" placeholder="未設定でもローカルのみなら利用可">
+    </label>
 
     <div class="grid">
       <label>
         音声言語
         <select id="sourceLanguage">
           <option value="en">英語</option>
-          <option value="multi">多言語</option>
           <option value="auto">自動検出</option>
+          <option value="multi">多言語</option>
           <option value="ja">日本語</option>
           <option value="ko">韓国語</option>
           <option value="zh">中国語</option>
@@ -43,7 +78,13 @@
     </div>
 
     <label>
-      区切りの速さ
+      固有名詞・専門用語
+      <textarea id="domainTerms" rows="3" placeholder="OpenAI&#10;Anthropic&#10;Claude&#10;Cursor"></textarea>
+    </label>
+    <p class="hint">ローカルQwen3-ASRではcontextとして認識へ直接反映します。</p>
+
+    <label id="endpointingLabel">
+      Deepgram区切り
       <select id="endpointingMs">
         <option value="220">最速（220ms）</option>
         <option value="350" selected>バランス（350ms）</option>
