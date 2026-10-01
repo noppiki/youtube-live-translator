@@ -210,9 +210,11 @@ async function translateText(text, sourceLanguage) {
   const target = settings.targetLanguage || 'ja';
   if (source === target) return text;
 
-  // Benchmark winner for the primary English → Japanese live-caption path.
-  // Fall back to Chrome Translator if the local model/service is unavailable.
-  if (source === 'en' && target === 'ja') {
+  // Gemma 4 E4B benchmarked well for English, Korean, Chinese, Spanish,
+  // French and German → Japanese. Fall back to Chrome Translator if local
+  // inference is unavailable or fails.
+  const gemmaSources = new Set(['en', 'ko', 'zh', 'es', 'fr', 'de']);
+  if (gemmaSources.has(source) && target === 'ja') {
     try {
       return await translateWithLocalGemma(text, source, target);
     } catch {}
