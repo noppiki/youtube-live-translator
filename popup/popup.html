@@ -49,6 +49,13 @@
       </label>
       <p class="hint" id="diarizationHint">英語＋FluidAudio時に利用できます。話者ラベルは少し遅れて確定します。</p>
 
+      <label class="checkLabel" id="speakerNameInferenceLabel">
+        <input id="speakerNameInference" type="checkbox" checked>
+        <span>会話内容から話者名・役割を自動推定</span>
+      </label>
+      <p class="hint" id="speakerNameInferenceHint">Chrome内蔵AIが使える場合は、会話・配信タイトル・概要欄から推定します。低確信度では名前を断定しません。</p>
+      <button id="prepareSpeakerAI">名前推定AIを準備</button>
+
       <div class="localActions">
         <button id="startLocal" class="secondary">ローカルAI起動</button>
         <button id="testLocal">接続テスト</button>
