@@ -119,7 +119,7 @@ function createUtteranceNode(utteranceId) {
 }
 
 function trimUtterances() {
-  const entries = [...utteranceNodes.entries()].sort((a, b) => a[0] - b[0]);
+  const entries = [...utteranceNodes.entries()];
   while (entries.length > 3) {
     const [id, node] = entries.shift();
     node.root.remove();
@@ -231,6 +231,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'LT_UTTERANCE') {
     upsertUtterance(message);
+    return;
+  }
+
+  if (message.type === 'LT_UTTERANCE_REMOVE') {
+    const utteranceId = Number(message.utteranceId);
+    const node = utteranceNodes.get(utteranceId);
+    if (node) {
+      node.root.remove();
+      utteranceNodes.delete(utteranceId);
+    }
     return;
   }
 
