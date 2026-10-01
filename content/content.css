@@ -87,7 +87,15 @@
   font-weight: 750;
 }
 
-#live-translator-overlay .lt-utterance.lt-partial .lt-translated:empty::after {
+#live-translator-overlay .lt-utterance.lt-partial .lt-translated:empty {
+  display: none;
+}
+
+#live-translator-overlay .lt-utterance.lt-translating .lt-translated:empty {
+  display: block;
+}
+
+#live-translator-overlay .lt-utterance.lt-translating .lt-translated:empty::after {
   content: "翻訳中…";
   opacity: 0.58;
   font-size: 0.72em;
