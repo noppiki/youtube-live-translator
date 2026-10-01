@@ -16,6 +16,7 @@ const apiKeyLabel = $('#apiKeyLabel');
 const sourceLanguage = $('#sourceLanguage');
 const targetLanguage = $('#targetLanguage');
 const translationSize = $('#translationSize');
+const translateComments = $('#translateComments');
 const translationSizeValue = $('#translationSizeValue');
 const diarization = $('#diarization');
 const diarizationLabel = $('#diarizationLabel');
@@ -41,6 +42,7 @@ const DEFAULTS = {
   sourceLanguage: 'en',
   targetLanguage: 'ja',
   translationSize: 100,
+  translateComments: true,
   diarization: false,
   speakerNameInference: true,
   domainTerms: 'OpenAI\nAnthropic\nClaude\nGemini\nCursor\nCodex\nMCP\nNVIDIA',
@@ -163,6 +165,7 @@ async function load() {
   sourceLanguage.value = stored.sourceLanguage;
   targetLanguage.value = stored.targetLanguage;
   translationSize.value = String(stored.translationSize || 100);
+  translateComments.checked = Boolean(stored.translateComments);
   translationSizeValue.value = `${translationSize.value}%`;
   diarization.checked = Boolean(stored.diarization);
   speakerNameInference.checked = Boolean(stored.speakerNameInference);
@@ -184,6 +187,7 @@ function readSettings() {
     sourceLanguage: sourceLanguage.value,
     targetLanguage: targetLanguage.value,
     translationSize: Number(translationSize.value),
+    translateComments: Boolean(translateComments.checked),
     diarization: Boolean(diarization.checked),
     speakerNameInference: Boolean(speakerNameInference.checked),
     domainTerms: domainTerms.value,
@@ -386,7 +390,7 @@ stopButton.addEventListener('click', async () => {
 
 for (const control of [
   engineMode, localBackend, localModel, apiKey, sourceLanguage,
-  targetLanguage, diarization, speakerNameInference, domainTerms, endpointingMs
+  targetLanguage, translateComments, diarization, speakerNameInference, domainTerms, endpointingMs
 ]) {
   control.addEventListener('change', async () => {
     updateVisibility();
