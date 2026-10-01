@@ -12,6 +12,9 @@ struct Output: Encodable {
     var final: Bool? = nil
     var speaker: Int? = nil
     var changeAtMs: Int? = nil
+    var utteranceId: Int? = nil
+    var startMs: Int? = nil
+    var endMs: Int? = nil
     var message: String? = nil
 }
 
@@ -48,7 +51,6 @@ actor SpeakerTracker {
 
     func feed(_ samples: [Float]) {
         guard loaded else { return }
-
         diarizer.addAudio(samples)
 
         do {
@@ -59,27 +61,17 @@ actor SpeakerTracker {
 
             guard let latest else { return }
 
-            if currentSpeaker == nil {
-                currentSpeaker = latest.speakerIndex
-                writer.send(
-                    Output(
-                        type: "speaker",
-                        speaker: latest.speakerIndex,
-                        changeAtMs: Int(latest.startTime * 1000)
+            if currentSpeaker == nil || currentSpeaker != latest.speakerIndex {
+                if currentSpeaker == nil || latest.duration >= 0.5 {
+                    currentSpeaker = latest.speakerIndex
+                    writer.send(
+                        Output(
+                            type: "speaker",
+                            speaker: latest.speakerIndex,
+                            changeAtMs: Int(latest.startTime * 1000)
+                        )
                     )
-                )
-                return
-            }
-
-            if currentSpeaker != latest.speakerIndex, latest.duration >= 0.5 {
-                currentSpeaker = latest.speakerIndex
-                writer.send(
-                    Output(
-                        type: "speaker",
-                        speaker: latest.speakerIndex,
-                        changeAtMs: Int(latest.startTime * 1000)
-                    )
-                )
+                }
             }
         } catch {
             writer.send(
@@ -101,8 +93,14 @@ actor Engine {
     private let writer: JSONWriter
     private var manager: StreamingEouAsrManager?
     private var speakers: SpeakerTracker?
-    private var lastText = ""
     private var configured = false
+
+    private var elapsedSamples = 0
+    private var utteranceId = 1
+    private var utteranceStartMs = 0
+    private var lastEouCount = 0
+    private var committedFullText = ""
+    private var lastPartialText = ""
 
     init(writer: JSONWriter) {
         self.writer = writer
@@ -166,6 +164,15 @@ actor Engine {
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
     }
 
+    private func suffix(after prefix: String, in full: String) -> String {
+        guard !prefix.isEmpty else { return full }
+        if full.hasPrefix(prefix) {
+            return String(full.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return full
+    }
+
     func feedPCM16(_ data: Data) async {
         guard let manager, configured else { return }
 
@@ -173,6 +180,7 @@ actor Engine {
             let ints = raw.bindMemory(to: Int16.self)
             return ints.map { Float(Int16(littleEndian: $0)) / 32768.0 }
         }
+        elapsedSamples += samples.count
 
         if let speakers {
             await speakers.feed(samples)
@@ -184,15 +192,44 @@ actor Engine {
             _ = try await manager.process(audioBuffer: buffer)
 
             let tokens = await manager.getRawTokenStrings()
-            let text = Self.transcript(from: tokens)
+            let fullText = Self.transcript(from: tokens)
+            let currentText = suffix(after: committedFullText, in: fullText)
+            let eouTimes = await manager.getEouTimestampsMs()
 
-            if !text.isEmpty, text != lastText {
-                lastText = text
+            if eouTimes.count > lastEouCount, let endMs = eouTimes.last {
+                let finalText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !finalText.isEmpty {
+                    writer.send(
+                        Output(
+                            type: "utterance",
+                            text: finalText,
+                            final: true,
+                            utteranceId: utteranceId,
+                            startMs: utteranceStartMs,
+                            endMs: endMs
+                        )
+                    )
+                    utteranceId += 1
+                }
+
+                committedFullText = fullText
+                utteranceStartMs = endMs
+                lastEouCount = eouTimes.count
+                lastPartialText = ""
+                return
+            }
+
+            if !currentText.isEmpty, currentText != lastPartialText {
+                lastPartialText = currentText
+                let endMs = (elapsedSamples * 1000) / 16_000
                 writer.send(
                     Output(
-                        type: "partial",
-                        text: text,
-                        final: false
+                        type: "utterance",
+                        text: currentText,
+                        final: false,
+                        utteranceId: utteranceId,
+                        startMs: utteranceStartMs,
+                        endMs: endMs
                     )
                 )
             }
@@ -210,21 +247,31 @@ actor Engine {
         guard let manager else { return }
 
         do {
-            let text = try await manager.finish()
+            let full = try await manager.finish()
                 .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            let remaining = suffix(after: committedFullText, in: full)
 
-            if !text.isEmpty {
+            if !remaining.isEmpty {
+                let endMs = (elapsedSamples * 1000) / 16_000
                 writer.send(
                     Output(
-                        type: "final",
-                        text: text,
-                        final: true
+                        type: "utterance",
+                        text: remaining,
+                        final: true,
+                        utteranceId: utteranceId,
+                        startMs: utteranceStartMs,
+                        endMs: endMs
                     )
                 )
+                utteranceId += 1
             }
 
             await manager.reset()
-            lastText = ""
+            elapsedSamples = 0
+            utteranceStartMs = 0
+            lastEouCount = 0
+            committedFullText = ""
+            lastPartialText = ""
         } catch {
             writer.send(
                 Output(
