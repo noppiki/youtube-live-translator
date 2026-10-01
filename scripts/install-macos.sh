@@ -55,6 +55,12 @@ if command -v swift >/dev/null 2>&1; then
   curl -fsSL "$RAW_BASE/fluid-bridge/Package.swift" -o "$FLUID_SRC/Package.swift"
   curl -fsSL "$RAW_BASE/fluid-bridge/Sources/FluidBridge/main.swift" -o "$FLUID_SRC/Sources/FluidBridge/main.swift"
 
+  # Package.swift is pinned to a verified FluidAudio revision. Remove an older
+  # resolved dependency so upgrades from previous installer versions cannot
+  # accidentally keep compiling against stale APIs.
+  rm -f "$FLUID_SRC/Package.resolved"
+  swift package resolve --package-path "$FLUID_SRC"
+
   if swift build -c release --package-path "$FLUID_SRC"; then
     cp "$FLUID_SRC/.build/release/FluidBridge" "$BIN_DIR/fluid-bridge"
     chmod +x "$BIN_DIR/fluid-bridge"
