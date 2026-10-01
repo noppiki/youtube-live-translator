@@ -46,9 +46,10 @@ async function translateOne(item) {
   const { messageEl, text, author } = item;
   if (!messageEl.isConnected || !enabled) return;
 
-  const out = ensureTranslationEl(messageEl);
-  out.textContent = '翻訳中…';
-  out.classList.add('lt-comment-translating');
+  const originalText = messageEl.textContent;
+  messageEl.dataset.ltOriginalText = originalText;
+  messageEl.textContent = '翻訳中…';
+  messageEl.classList.add('lt-comment-translating');
 
   try {
     const response = await chrome.runtime.sendMessage({
@@ -59,13 +60,18 @@ async function translateOne(item) {
     });
     if (!messageEl.isConnected) return;
     if (!response?.ok || !response.translated) {
-      out.remove();
+      messageEl.textContent = originalText;
+      messageEl.classList.remove('lt-comment-translating');
       return;
     }
-    out.textContent = response.translated;
-    out.classList.remove('lt-comment-translating');
+    messageEl.textContent = response.translated;
+    messageEl.classList.remove('lt-comment-translating');
+    messageEl.classList.add('lt-comment-replaced');
   } catch {
-    out.remove();
+    if (messageEl.isConnected) {
+      messageEl.textContent = originalText;
+      messageEl.classList.remove('lt-comment-translating');
+    }
   }
 }
 
@@ -133,7 +139,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   enabled = Boolean(changes.translateComments.newValue);
   if (!enabled) {
     pending.length = 0;
-    for (const el of document.querySelectorAll('.lt-comment-translation')) el.remove();
+    for (const el of document.querySelectorAll('.lt-comment-replaced, .lt-comment-translating')) {
+      if (el.dataset.ltOriginalText) el.textContent = el.dataset.ltOriginalText;
+      el.classList.remove('lt-comment-replaced', 'lt-comment-translating');
+    }
   } else {
     scan();
   }
