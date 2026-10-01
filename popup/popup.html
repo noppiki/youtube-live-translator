@@ -27,7 +27,7 @@
       </div>
 
       <label>
-        ローカルバックエンド
+        音声認識バックエンド
         <select id="localBackend">
           <option value="auto">自動（英語: FluidAudio / その他: Qwen3）</option>
           <option value="fluid">FluidAudio（英語・低遅延・話者分離）</option>
@@ -36,12 +36,14 @@
       </label>
 
       <label id="qwenModelLabel">
-        Qwen3モデル
+        Qwen3-ASRモデル（音声認識）
         <select id="localModel">
           <option value="moona3k/mlx-qwen3-asr-0.6b-4bit">Qwen3-ASR 0.6B 4-bit（推奨・約517MB）</option>
           <option value="moona3k/mlx-qwen3-asr-1.7b-4bit">Qwen3-ASR 1.7B 4-bit（高精度・約1.2GB）</option>
         </select>
       </label>
+
+      <p class="hint" id="translationModelHint"><strong>翻訳モデル:</strong> Gemma 4 E4B IT（英語 → 日本語・文脈翻訳）</p>
 
       <label class="checkLabel" id="diarizationLabel">
         <input id="diarization" type="checkbox">
@@ -110,7 +112,7 @@
       固有名詞・専門用語
       <textarea id="domainTerms" rows="3" placeholder="OpenAI&#10;Anthropic&#10;Claude&#10;Cursor"></textarea>
     </label>
-    <p class="hint" id="domainTermsHint">Qwen3-ASR使用時はcontextとして認識へ直接反映します。</p>
+    <p class="hint" id="domainTermsHint">英→日はGemma 4 E4Bの翻訳用語集として利用します。Qwen3-ASR使用時は音声認識contextにも反映します。</p>
 
     <label id="endpointingLabel">
       Deepgram区切り
