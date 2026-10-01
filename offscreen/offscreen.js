@@ -212,6 +212,7 @@ function liveSegmentId(baseId, index) {
 function clearLiveSplit(baseId) {
   const ids = liveSplitIds.get(Number(baseId)) || [];
   for (const id of ids) {
+    if (turnFinalizedIds.has(id)) continue;
     sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: id });
   }
   liveSplitIds.delete(Number(baseId));
