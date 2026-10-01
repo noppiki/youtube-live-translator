@@ -12,6 +12,7 @@ let settings = null;
 let finalizedPieces = [];
 let translatorCache = new Map();
 let translateSequence = 0;
+let currentSpeaker = null;
 
 const LANGUAGE_CODES = {
   English: 'en', Japanese: 'ja', Korean: 'ko', Chinese: 'zh',
@@ -144,7 +145,8 @@ async function emitSubtitle(text, sourceLanguage, final) {
       original: displayText,
       translated,
       final,
-      sourceLanguage: normalizeSourceLanguage(sourceLanguage)
+      sourceLanguage: normalizeSourceLanguage(sourceLanguage),
+      speaker: currentSpeaker
     });
   } catch (error) {
     sendOverlay('LT_STATUS', { state: 'error', message: error?.message || String(error) });
@@ -256,7 +258,9 @@ function openLocalSocket() {
         language,
         context,
         chunkSizeSec: 1.0,
-        maxContextSec: 30.0
+        maxContextSec: 30.0,
+        localBackend: settings.localBackend || 'auto',
+        diarization: Boolean(settings.diarization)
       }));
     };
 
@@ -269,13 +273,24 @@ function openLocalSocket() {
         if (!settled) {
           settled = true;
           activeSocket = socket;
-          activeProvider = 'local';
+          activeProvider = data.backend || 'local';
+          if (data.warning) {
+            sendOverlay('LT_STATUS', { state: 'warning', message: data.warning });
+          }
           resolve();
         }
         return;
       }
       if (data.type === 'partial' || data.type === 'final') {
-        emitSubtitle(data.text || data.stableText || '', data.language, data.type === 'final');
+        emitSubtitle(data.text || data.stableText || '', data.language || settings.sourceLanguage, data.type === 'final');
+      } else if (data.type === 'speaker') {
+        currentSpeaker = Number.isInteger(data.speaker) ? data.speaker : null;
+        sendOverlay('LT_SPEAKER', {
+          speaker: currentSpeaker,
+          changeAtMs: data.changeAtMs ?? null
+        });
+      } else if (data.type === 'warning') {
+        sendOverlay('LT_STATUS', { state: 'warning', message: data.message || 'ローカルAI警告' });
       } else if (data.type === 'error') {
         sendOverlay('LT_STATUS', { state: 'error', message: `ローカルSTT: ${data.message}` });
       }
@@ -289,7 +304,7 @@ function openLocalSocket() {
       }
     };
     socket.onclose = () => {
-      if (running && activeProvider === 'local') {
+      if (running && activeProvider !== 'deepgram') {
         sendOverlay('LT_STATUS', { state: 'error', message: 'ローカルSTTとの接続が終了しました。' });
       }
     };
@@ -354,7 +369,7 @@ async function stopAll() {
   if (activeSocket) {
     try {
       if (activeSocket.readyState === WebSocket.OPEN) {
-        if (activeProvider === 'local') activeSocket.send(JSON.stringify({ type: 'finalize' }));
+        if (activeProvider !== 'deepgram') activeSocket.send(JSON.stringify({ type: 'finalize' }));
         else {
           activeSocket.send(JSON.stringify({ type: 'Finalize' }));
           activeSocket.send(JSON.stringify({ type: 'CloseStream' }));
@@ -365,6 +380,7 @@ async function stopAll() {
     activeSocket = null;
   }
   activeProvider = null;
+  currentSpeaker = null;
 
   if (keepAliveTimer) {
     clearInterval(keepAliveTimer);
@@ -402,7 +418,11 @@ async function startAll(message) {
   await setupAudio(message.streamId);
   running = true;
 
-  const label = activeProvider === 'local' ? 'ローカル Qwen3-ASR' : 'Deepgram';
+  const label =
+    activeProvider === 'fluid' ? 'FluidAudio · Parakeet' :
+    activeProvider === 'qwen' ? 'Qwen3-ASR' :
+    activeProvider === 'local' ? 'ローカルAI' :
+    'Deepgram';
   sendOverlay('LT_STATUS', { state: 'running', message: `ライブ翻訳中 · ${label}` });
 }
 
