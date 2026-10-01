@@ -6,11 +6,13 @@ Live-caption English → Japanese benchmark for the local translation backend.
 
 | Alias | Model | Purpose |
 |---|---|---|
-| `qwen` | `Qwen/Qwen3-4B-MLX-4bit` | Context-aware general LLM |
-| `gemma` | `mlx-community/gemma-3-text-4b-it-4bit` | Context-aware general LLM |
-| `translategemma` | `mlx-community/translategemma-4b-it-4bit` | Translation-specialized model |
+| `gemma3` | `mlx-community/gemma-3-text-4b-it-4bit` | Current baseline |
+| `gemma4e4b` | `Siarhei/gemma-4-E4B-4bit` | Gemma 4 small text-generation candidate |
+| `gemma4-12b` | `DreamFoundries/gemma-4-12B-it-4bit` | Gemma 4 higher-quality text-generation candidate |
+| `qwen` | `Qwen/Qwen3-4B-MLX-4bit` | Context-aware comparison baseline |
+| `translategemma` | `mlx-community/translategemma-4b-it-4bit` | Translation-specialized reference |
 
-TranslateGemma is evaluated with its official structured translation prompt. It therefore receives only the current utterance, while Qwen and Gemma receive the last three dialogue turns plus glossary terms.
+Gemma 3, Gemma 4 and Qwen receive the last three dialogue turns plus glossary terms. TranslateGemma is evaluated separately with its structured translation prompt and receives only the current utterance.
 
 ## Run on Apple Silicon
 
@@ -27,7 +29,10 @@ Quick smoke test:
 Single model:
 
 ```bash
-./scripts/benchmark-translation.sh --models qwen
+./scripts/benchmark-translation.sh --models gemma4e4b
+
+# Higher-quality candidate only
+./scripts/benchmark-translation.sh --models gemma4-12b
 ```
 
 Outputs:
