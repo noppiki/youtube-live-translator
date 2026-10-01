@@ -15,6 +15,8 @@ struct Output: Encodable {
     var utteranceId: Int? = nil
     var startMs: Int? = nil
     var endMs: Int? = nil
+    var tokenStrings: [String]? = nil
+    var tokenTimestampsMs: [Int]? = nil
     var message: String? = nil
 }
 
@@ -100,6 +102,7 @@ actor Engine {
     private var utteranceStartMs = 0
     private var lastEouCount = 0
     private var committedFullText = ""
+    private var committedTokenCount = 0
     private var lastPartialText = ""
 
     init(writer: JSONWriter) {
@@ -192,8 +195,11 @@ actor Engine {
             _ = try await manager.process(audioBuffer: buffer)
 
             let tokens = await manager.getRawTokenStrings()
+            let tokenTimes = await manager.getTokenTimestampsMs()
             let fullText = Self.transcript(from: tokens)
             let currentText = suffix(after: committedFullText, in: fullText)
+            let currentTokens = committedTokenCount < tokens.count ? Array(tokens.dropFirst(committedTokenCount)) : []
+            let currentTokenTimes = committedTokenCount < tokenTimes.count ? Array(tokenTimes.dropFirst(committedTokenCount)) : []
             let eouTimes = await manager.getEouTimestampsMs()
 
             if eouTimes.count > lastEouCount, let endMs = eouTimes.last {
@@ -206,13 +212,16 @@ actor Engine {
                             final: true,
                             utteranceId: utteranceId,
                             startMs: utteranceStartMs,
-                            endMs: endMs
+                            endMs: endMs,
+                            tokenStrings: currentTokens,
+                            tokenTimestampsMs: currentTokenTimes
                         )
                     )
                     utteranceId += 1
                 }
 
                 committedFullText = fullText
+                committedTokenCount = tokens.count
                 utteranceStartMs = endMs
                 lastEouCount = eouTimes.count
                 lastPartialText = ""
@@ -271,6 +280,7 @@ actor Engine {
             utteranceStartMs = 0
             lastEouCount = 0
             committedFullText = ""
+            committedTokenCount = 0
             lastPartialText = ""
         } catch {
             writer.send(
