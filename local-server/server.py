@@ -37,6 +37,7 @@ _session_lock = asyncio.Lock()
 _translation_model = None
 _translation_tokenizer = None
 _translation_lock = asyncio.Lock()
+_translation_inference_lock = asyncio.Lock()
 
 TRANSLATION_SYSTEM = """You translate English live-stream captions into concise, natural Japanese subtitles.
 Use recent dialogue only as context. Translate CURRENT only.
@@ -135,14 +136,15 @@ async def translate(request: web.Request):
         raise web.HTTPBadRequest(text="Local smart translation currently supports English → Japanese only.")
 
     model, tokenizer = await get_translation_model()
-    translated = await asyncio.to_thread(
-        _translate_sync,
-        model,
-        tokenizer,
-        text,
-        data.get("context") or [],
-        data.get("glossary") or [],
-    )
+    async with _translation_inference_lock:
+        translated = await asyncio.to_thread(
+            _translate_sync,
+            model,
+            tokenizer,
+            text,
+            data.get("context") or [],
+            data.get("glossary") or [],
+        )
     return web.json_response({
         "ok": True,
         "translated": translated,
