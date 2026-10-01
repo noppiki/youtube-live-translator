@@ -16,6 +16,7 @@ let nextGenericUtteranceId = 1;
 let speakerTimeline = [];
 let recentUtterances = new Map();
 let utteranceTranslationSeq = new Map();
+let finalTranslationCache = new Map();
 let speakerProfiles = new Map();
 let speakerInferenceSession = null;
 let speakerInferenceBusy = false;
@@ -168,15 +169,48 @@ async function emitUtterance({
   }
 
   const speaker = speakerForUtterance(id);
+
+  // Partial ASR updates are intentionally NOT translated.
+  // This keeps the original transcript live while preventing the translated
+  // sentence from being rewritten on every recognition update.
+  if (!final) {
+    sendOverlay('LT_UTTERANCE', {
+      utteranceId: id,
+      original: displayText,
+      final: false,
+      speaker,
+      translationPending: false,
+      startMs,
+      endMs
+    });
+    return;
+  }
+
+  const cached = finalTranslationCache.get(id);
+  if (cached?.source === displayText) {
+    sendOverlay('LT_UTTERANCE', {
+      utteranceId: id,
+      original: displayText,
+      translated: cached.translated,
+      final: true,
+      speaker,
+      translationPending: false,
+      sourceLanguage: normalizeSourceLanguage(sourceLanguage),
+      startMs,
+      endMs
+    });
+    return;
+  }
+
   const sequence = ++translateSequence;
   utteranceTranslationSeq.set(id, sequence);
 
   sendOverlay('LT_UTTERANCE', {
     utteranceId: id,
     original: displayText,
-    translated: '',
-    final,
+    final: true,
     speaker,
+    translationPending: true,
     startMs,
     endMs
   });
@@ -184,28 +218,46 @@ async function emitUtterance({
   try {
     const translated = await translateText(displayText, sourceLanguage);
     if (!running || utteranceTranslationSeq.get(id) !== sequence) return;
+
+    finalTranslationCache.set(id, {
+      source: displayText,
+      translated
+    });
+    if (finalTranslationCache.size > 20) {
+      const oldest = [...finalTranslationCache.keys()].sort((a, b) => a - b)[0];
+      finalTranslationCache.delete(oldest);
+    }
+
     const resolvedSpeaker = speakerForUtterance(id);
     sendOverlay('LT_UTTERANCE', {
       utteranceId: id,
       original: displayText,
       translated,
-      final,
+      final: true,
       speaker: resolvedSpeaker,
+      translationPending: false,
       sourceLanguage: normalizeSourceLanguage(sourceLanguage),
       startMs,
       endMs
     });
 
-    if (final) {
-      rememberFinalUtterance({
-        utteranceId: id,
-        text: displayText,
-        speaker: resolvedSpeaker,
-        startMs,
-        endMs
-      });
-    }
+    rememberFinalUtterance({
+      utteranceId: id,
+      text: displayText,
+      speaker: resolvedSpeaker,
+      startMs,
+      endMs
+    });
   } catch (error) {
+    sendOverlay('LT_UTTERANCE', {
+      utteranceId: id,
+      original: displayText,
+      final: true,
+      speaker: speakerForUtterance(id),
+      translationPending: false,
+      startMs,
+      endMs
+    });
     sendOverlay('LT_STATUS', { state: 'error', message: error?.message || String(error) });
   }
 }
@@ -701,6 +753,7 @@ async function stopAll({ announce = true } = {}) {
   speakerTimeline = [];
   recentUtterances = new Map();
   utteranceTranslationSeq = new Map();
+  finalTranslationCache = new Map();
   speakerProfiles = new Map();
   finalizedConversation = [];
   clearTimeout(speakerInferenceTimer);
