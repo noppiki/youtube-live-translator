@@ -15,6 +15,7 @@ let translateSequence = 0;
 let nextGenericUtteranceId = 1;
 let speakerTimeline = [];
 let recentUtterances = new Map();
+let utteranceTranslationSeq = new Map();
 
 const LANGUAGE_CODES = {
   English: 'en', Japanese: 'ja', Korean: 'ko', Chinese: 'zh',
@@ -161,6 +162,7 @@ async function emitUtterance({
 
   const speaker = speakerForUtterance(id);
   const sequence = ++translateSequence;
+  utteranceTranslationSeq.set(id, sequence);
 
   sendOverlay('LT_UTTERANCE', {
     utteranceId: id,
@@ -174,7 +176,7 @@ async function emitUtterance({
 
   try {
     const translated = await translateText(displayText, sourceLanguage);
-    if (!running || sequence < translateSequence - 6) return;
+    if (!running || utteranceTranslationSeq.get(id) !== sequence) return;
     sendOverlay('LT_UTTERANCE', {
       utteranceId: id,
       original: displayText,
@@ -495,6 +497,7 @@ async function stopAll({ announce = true } = {}) {
   nextGenericUtteranceId = 1;
   speakerTimeline = [];
   recentUtterances = new Map();
+  utteranceTranslationSeq = new Map();
 
   if (keepAliveTimer) {
     clearInterval(keepAliveTimer);
