@@ -27,22 +27,37 @@
       </div>
 
       <label>
-        ローカルモデル
+        ローカルバックエンド
+        <select id="localBackend">
+          <option value="auto">自動（英語: FluidAudio / その他: Qwen3）</option>
+          <option value="fluid">FluidAudio（英語・低遅延・話者分離）</option>
+          <option value="qwen">Qwen3-ASR（多言語・専門用語context）</option>
+        </select>
+      </label>
+
+      <label id="qwenModelLabel">
+        Qwen3モデル
         <select id="localModel">
           <option value="moona3k/mlx-qwen3-asr-0.6b-4bit">Qwen3-ASR 0.6B 4-bit（推奨・約517MB）</option>
           <option value="moona3k/mlx-qwen3-asr-1.7b-4bit">Qwen3-ASR 1.7B 4-bit（高精度・約1.2GB）</option>
         </select>
       </label>
 
+      <label class="checkLabel" id="diarizationLabel">
+        <input id="diarization" type="checkbox">
+        <span>話者分離（FluidAudio Sortformer）</span>
+      </label>
+      <p class="hint" id="diarizationHint">英語＋FluidAudio時に利用できます。話者ラベルは少し遅れて確定します。</p>
+
       <div class="localActions">
-        <button id="startLocal" class="secondary">ローカル起動</button>
+        <button id="startLocal" class="secondary">ローカルAI起動</button>
         <button id="testLocal">接続テスト</button>
         <button id="installModel">モデル準備</button>
       </div>
 
       <details>
-        <summary>初回インストール / 起動ヘルパー更新</summary>
-        <p class="hint">Apple Silicon Mac用。Qwen3導入済みでも、拡張から起動する機能を追加するには一度この最新版を実行してください。</p>
+        <summary>初回インストール / ローカルAI更新</summary>
+        <p class="hint">Apple Silicon Mac用。v0.4ではFluidAudioのSwiftバイナリもビルドします。既存ユーザーも一度再実行してください。</p>
         <textarea id="installCommand" readonly rows="3"></textarea>
         <button id="copyInstall">コマンドをコピー</button>
       </details>
@@ -84,11 +99,11 @@
     </label>
     <p class="hint">70〜180%。変更は開いているYouTubeへ即時反映されます。</p>
 
-    <label>
+    <label id="domainTermsLabel">
       固有名詞・専門用語
       <textarea id="domainTerms" rows="3" placeholder="OpenAI&#10;Anthropic&#10;Claude&#10;Cursor"></textarea>
     </label>
-    <p class="hint">ローカルQwen3-ASRではcontextとして認識へ直接反映します。</p>
+    <p class="hint" id="domainTermsHint">Qwen3-ASR使用時はcontextとして認識へ直接反映します。</p>
 
     <label id="endpointingLabel">
       Deepgram区切り
