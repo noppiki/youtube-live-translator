@@ -1,0 +1,45 @@
+#live-translator-overlay {
+  position: fixed;
+  left: 50%;
+  bottom: 9vh;
+  transform: translateX(-50%);
+  z-index: 2147483646;
+  width: min(86vw, 1100px);
+  display: none;
+  pointer-events: none;
+  text-align: center;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#live-translator-overlay.lt-visible { display: block; }
+
+#live-translator-overlay .lt-original,
+#live-translator-overlay .lt-translated,
+#live-translator-overlay .lt-status {
+  display: table;
+  max-width: 100%;
+  margin: 4px auto;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.74);
+  color: #fff;
+  text-shadow: 0 1px 3px #000;
+  line-height: 1.35;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+#live-translator-overlay .lt-original {
+  font-size: clamp(16px, 1.45vw, 25px);
+  opacity: 0.9;
+}
+
+#live-translator-overlay .lt-translated {
+  font-size: clamp(21px, 2vw, 34px);
+  font-weight: 700;
+}
+
+#live-translator-overlay .lt-status {
+  font-size: 14px;
+  opacity: 0.84;
+}
