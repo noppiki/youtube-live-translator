@@ -686,7 +686,7 @@ function openLocalSocket() {
       }));
     };
 
-    socket.onmessage = (event) => {
+    socket.onmessage = async (event) => {
       let data;
       try { data = JSON.parse(event.data); } catch { return; }
 
