@@ -1,0 +1,1 @@
+Gemma four tests local subtitles. Latency fell from nine sixty to six forty milliseconds.
