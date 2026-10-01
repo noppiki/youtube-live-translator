@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Live Translator for YouTube",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Real-time translated subtitles for YouTube Live with FluidAudio speaker diarization, Qwen3-ASR, and Deepgram fallback.",
   "minimum_chrome_version": "138",
   "permissions": [
