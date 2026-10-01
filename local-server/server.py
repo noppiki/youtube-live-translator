@@ -19,7 +19,7 @@ FLUID_BRIDGE = Path(os.environ.get("YTLT_FLUID_BRIDGE", APP_DIR / "bin/fluid-bri
 DEFAULT_MODEL = os.environ.get("YTLT_MODEL", "moona3k/mlx-qwen3-asr-0.6b-4bit")
 TRANSLATION_MODEL = os.environ.get(
     "YTLT_TRANSLATION_MODEL",
-    "mlx-community/gemma-3-text-4b-it-4bit",
+    "DreamFoundries/gemma-4-E4B-it-4bit",
 )
 
 MODELS = {
@@ -45,7 +45,7 @@ Preserve person names, product names, model names, acronyms, and technical terms
 Follow the glossary exactly.
 Do not explain or add notes. Output Japanese translation only.
 Prefer natural spoken Japanese over literal wording.
-Keep the subtitle concise without dropping meaning or negation."""
+Keep the subtitle concise without dropping meaning, negation, numbers, or units."""
 
 
 def _allowed_origin(request: web.Request) -> bool:
@@ -91,15 +91,23 @@ GLOSSARY:
 
 CURRENT:
 {text}"""
-    prompt = tokenizer.apply_chat_template(
-        [
-            {"role": "system", "content": TRANSLATION_SYSTEM},
-            {"role": "user", "content": user},
-        ],
-        tokenize=False,
-        add_generation_prompt=True,
-        enable_thinking=False,
-    )
+    messages = [
+        {"role": "system", "content": TRANSLATION_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+    try:
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+    except TypeError:
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
 
     chunks = []
     for response in stream_generate(
