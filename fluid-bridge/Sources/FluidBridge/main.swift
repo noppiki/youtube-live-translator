@@ -142,11 +142,9 @@ actor Engine {
         guard let buffer = Self.pcmBuffer(samples) else { return }
 
         do {
-            _ = try await manager.process(audioBuffer: buffer)
-            let tokens = await manager.getRawTokenStrings()
-            let text = tokens.joined()
-                .replacingOccurrences(of: "▁", with: " ")
-                .replacingOccurrences(of: "  ", with: " ")
+            try await manager.appendAudio(buffer)
+            try await manager.processBufferedAudio()
+            let text = await manager.getPartialTranscript()
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !text.isEmpty, text != lastText {
@@ -166,7 +164,7 @@ actor Engine {
             if !text.isEmpty {
                 writer.send(Output(type: "final", text: text, final: true))
             }
-            await manager.reset()
+            try await manager.reset()
             lastText = ""
         } catch {
             writer.send(Output(type: "error", message: error.localizedDescription))
