@@ -289,6 +289,9 @@ function rememberFinalUtterance({ utteranceId, text, speaker, startMs, endMs }) 
 
 function inferExplicitNames() {
   const bySpeaker = new Map();
+  const knownSpeakers = [...new Set(
+    finalizedConversation.map((u) => u.speaker).filter(Number.isInteger)
+  )];
 
   for (const item of finalizedConversation) {
     if (!Number.isInteger(item.speaker)) continue;
@@ -302,6 +305,22 @@ function inferExplicitNames() {
         confidence: 0.96,
         source: 'self-introduction'
       });
+      continue;
+    }
+
+    if (knownSpeakers.length === 2) {
+      const addressed = text.match(/\b(?:thanks|thank you|welcome|good to have you|over to you)[,\s]+([A-Z][A-Za-z.'-]{1,30})(?:\b|[,.!?])/i);
+      if (addressed) {
+        const other = knownSpeakers.find((speaker) => speaker !== item.speaker);
+        if (Number.isInteger(other) && !bySpeaker.has(other)) {
+          bySpeaker.set(other, {
+            name: addressed[1].trim(),
+            role: '',
+            confidence: 0.82,
+            source: 'direct-address'
+          });
+        }
+      }
     }
   }
 
