@@ -31,17 +31,23 @@ MODELS = {
     },
 }
 
-SYSTEM = """You translate English live-stream captions into concise, natural Japanese subtitles.
+SYSTEM = """You translate live-stream captions into concise, natural subtitles.
 Use the recent dialogue only as context. Translate CURRENT only.
-Preserve product names and follow the glossary exactly.
-Do not explain. Output Japanese translation only.
-Prefer natural spoken Japanese over literal wording.
-Keep the subtitle concise without dropping meaning."""
+Preserve person names, product names, model names, acronyms, numbers, and units unless the glossary specifies otherwise.
+Follow the glossary exactly.
+Do not explain. Output the translation only.
+Prefer natural spoken wording over literal wording.
+Keep the subtitle concise without dropping meaning or negation."""
 
 def build_context_prompt(tokenizer, case):
     context = "\n".join(case.get("context", [])[-3:]) or "(none)"
     glossary = "\n".join(f"- {x}" for x in case.get("glossary", [])) or "(none)"
-    user = f"""RECENT CONTEXT:
+    source = case.get("source_language", "en")
+    target = case.get("target_language", "ja")
+    user = f"""SOURCE LANGUAGE: {source}
+TARGET LANGUAGE: {target}
+
+RECENT CONTEXT:
 {context}
 
 GLOSSARY:
@@ -73,8 +79,8 @@ def build_translate_gemma_prompt(tokenizer, case):
         "role": "user",
         "content": [{
             "type": "text",
-            "source_lang_code": "en",
-            "target_lang_code": "ja",
+            "source_lang_code": case.get("source_language", "en"),
+            "target_lang_code": case.get("target_language", "ja"),
             "text": case["current"],
         }],
     }]
@@ -161,6 +167,8 @@ def main():
                 "model": alias,
                 "model_id": spec["id"],
                 "case_id": case["id"],
+                "source_language": case.get("source_language", "en"),
+                "target_language": case.get("target_language", "ja"),
                 "source": case["current"],
                 "context": case.get("context", []),
                 "glossary": case.get("glossary", []),
@@ -182,7 +190,7 @@ def main():
         writer = csv.DictWriter(
             fh,
             fieldnames=[
-                "model", "model_id", "case_id", "ttft_ms", "total_ms",
+                "model", "model_id", "case_id", "source_language", "target_language", "ttft_ms", "total_ms",
                 "output_tokens", "decode_tok_s", "source", "output"
             ],
         )
