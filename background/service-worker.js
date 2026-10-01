@@ -64,6 +64,37 @@ async function stopCapture() {
   return { ok: true };
 }
 
+
+async function translateComment(text, author = '') {
+  const stored = await chrome.storage.local.get({ domainTerms: '' });
+  const glossary = String(stored.domainTerms || '')
+    .split(/\n|,/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch('http://127.0.0.1:8765/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        sourceLanguage: 'en',
+        targetLanguage: 'ja',
+        context: author ? [`YouTube commenter: ${author}`] : [],
+        glossary
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    return { ok: true, translated: data?.translated || '' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.target !== 'background') return;
 
@@ -82,6 +113,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse(status || { ok: true, running: false });
           break;
         }
+        case 'TRANSLATE_COMMENT':
+          sendResponse(await translateComment(
+            String(message.text || '').trim(),
+            String(message.author || '').trim()
+          ));
+          break;
         default:
           sendResponse({ ok: false, error: 'Unknown background message' });
       }
