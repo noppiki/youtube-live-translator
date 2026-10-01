@@ -2,18 +2,17 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  width: 360px;
+  width: 410px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: Canvas;
   color: CanvasText;
 }
 main { padding: 16px; }
 h1 { margin: 0 0 6px; font-size: 20px; }
-.lead { margin: 0 0 16px; font-size: 13px; opacity: .78; line-height: 1.45; }
-label { display: grid; gap: 6px; margin: 12px 0; font-size: 13px; font-weight: 650; }
-input, select, button {
+.lead { margin: 0 0 14px; font-size: 13px; opacity: .78; line-height: 1.45; }
+label { display: grid; gap: 6px; margin: 11px 0; font-size: 13px; font-weight: 650; }
+input, select, textarea, button {
   width: 100%;
-  min-height: 38px;
   border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
   border-radius: 9px;
   padding: 8px 10px;
@@ -21,11 +20,27 @@ input, select, button {
   background: Canvas;
   color: CanvasText;
 }
+input, select, button { min-height: 38px; }
+textarea { resize: vertical; font-size: 12px; line-height: 1.4; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.hint { font-size: 11px; line-height: 1.45; opacity: .68; margin: -6px 0 10px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.card {
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  border-radius: 12px;
+  padding: 11px;
+  margin: 12px 0;
+  background: color-mix(in srgb, CanvasText 4%, Canvas);
+}
+.cardTitle { display:flex; align-items:center; justify-content:space-between; font-weight:700; font-size:13px; }
+.badge { border-radius:999px; padding:3px 8px; font-size:11px; font-weight:700; }
+.badge.online { background:#167c3a22; color:#35a85c; }
+.badge.offline { background:#b22b2b22; color:#e05d5d; }
+.hint { font-size: 11px; line-height: 1.45; opacity: .68; margin: -5px 0 9px; }
 .buttons { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-top: 14px; }
 button { cursor: pointer; font-weight: 700; }
 button.primary { background: #ff0033; color: white; border-color: transparent; }
 button:disabled { opacity: .5; cursor: default; }
-.status { margin-top: 12px; font-size: 12px; min-height: 18px; opacity: .8; }
+.status { margin-top: 12px; font-size: 12px; min-height: 18px; opacity: .85; }
+summary { cursor:pointer; margin-top:10px; font-size:12px; font-weight:700; }
+details textarea { margin:8px 0; }
 code { font-size: 10px; }
