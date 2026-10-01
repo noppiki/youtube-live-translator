@@ -84,3 +84,21 @@ A practical winner should satisfy both:
 - consistently high manual scores on context, terminology and naturalness
 
 If TranslateGemma is clearly fastest but loses context-dependent cases, it can still be kept as a `fast` mode while the best context LLM becomes `smart` mode.
+
+
+## Multilingual → Japanese benchmark
+
+Korean, Chinese, Spanish, French and German live-caption cases are in `translation_cases_multilingual.json`.
+
+Run Gemma 4 E4B:
+
+```bash
+./scripts/benchmark-translation.sh \
+  --models gemma4e4b \
+  --cases benchmarks/translation_cases_multilingual.json \
+  --output multilingual-benchmark-results.json \
+  --csv multilingual-benchmark-results.csv
+```
+
+The multilingual set tests casual speech, technical terminology, negation and numbers/units.
+Use the same source strings when comparing against Chrome Translator so quality can be reviewed side-by-side.
