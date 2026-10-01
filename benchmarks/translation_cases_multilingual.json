@@ -1,0 +1,176 @@
+{
+  "description": "Multilingual live-caption benchmark: Korean, Chinese, Spanish, French and German to Japanese.",
+  "cases": [
+    {
+      "id": "ko_casual",
+      "source_language": "ko",
+      "target_language": "ja",
+      "context": [
+        "A: 오늘 데모 준비됐어?"
+      ],
+      "current": "B: 응, 거의 다 됐어. 근데 저 버튼은 누르지 마.",
+      "glossary": []
+    },
+    {
+      "id": "ko_tech",
+      "source_language": "ko",
+      "target_language": "ja",
+      "context": [
+        "A: 새 코딩 에이전트를 개발자들에게 공개할 거예요."
+      ],
+      "current": "A: 다음 주에 AI 에이전트를 출시합니다.",
+      "glossary": [
+        "AI 에이전트=AIエージェント"
+      ]
+    },
+    {
+      "id": "ko_negation",
+      "source_language": "ko",
+      "target_language": "ja",
+      "context": [
+        "A: 업데이트로 로컬 모드가 없어졌나요?"
+      ],
+      "current": "B: 아니요, 클라우드 폴백을 켜지 않으면 로컬 추론은 비활성화되지 않습니다.",
+      "glossary": [
+        "로컬 추론=ローカル推論",
+        "클라우드 폴백=クラウドフォールバック"
+      ]
+    },
+    {
+      "id": "zh_casual",
+      "source_language": "zh",
+      "target_language": "ja",
+      "context": [
+        "A: 我们真的准备好现场演示了吗？"
+      ],
+      "current": "B: 差不多吧，不过千万别点那个按钮。",
+      "glossary": []
+    },
+    {
+      "id": "zh_tech",
+      "source_language": "zh",
+      "target_language": "ja",
+      "context": [
+        "A: 我们正在把新的编程智能体带给开发者。"
+      ],
+      "current": "A: 我们下周发布这个AI智能体。",
+      "glossary": [
+        "AI智能体=AIエージェント"
+      ]
+    },
+    {
+      "id": "zh_numbers",
+      "source_language": "zh",
+      "target_language": "ja",
+      "context": [
+        "A: 旧接口明显有点慢。"
+      ],
+      "current": "A: 我们把延迟从960毫秒降到了大约640毫秒。",
+      "glossary": []
+    },
+    {
+      "id": "es_casual",
+      "source_language": "es",
+      "target_language": "ja",
+      "context": [
+        "A: ¿De verdad estamos listos para hacer la demo en directo?"
+      ],
+      "current": "B: Más o menos. Solo no pulses ese botón.",
+      "glossary": []
+    },
+    {
+      "id": "es_tech",
+      "source_language": "es",
+      "target_language": "ja",
+      "context": [
+        "A: Estamos llevando el nuevo agente de programación a los desarrolladores."
+      ],
+      "current": "A: Lanzamos el agente de IA la semana que viene.",
+      "glossary": [
+        "agente de IA=AIエージェント"
+      ]
+    },
+    {
+      "id": "es_negation",
+      "source_language": "es",
+      "target_language": "ja",
+      "context": [
+        "A: ¿La actualización eliminó el modo local?"
+      ],
+      "current": "B: No, no desactiva la inferencia local a menos que actives el respaldo en la nube.",
+      "glossary": [
+        "inferencia local=ローカル推論",
+        "respaldo en la nube=クラウドフォールバック"
+      ]
+    },
+    {
+      "id": "fr_casual",
+      "source_language": "fr",
+      "target_language": "ja",
+      "context": [
+        "A: On est vraiment prêts pour la démo en direct ?"
+      ],
+      "current": "B: Plus ou moins. Évite juste de cliquer sur ce bouton.",
+      "glossary": []
+    },
+    {
+      "id": "fr_tech",
+      "source_language": "fr",
+      "target_language": "ja",
+      "context": [
+        "A: Nous mettons le nouvel agent de programmation à disposition des développeurs."
+      ],
+      "current": "A: Nous lançons l'agent IA la semaine prochaine.",
+      "glossary": [
+        "agent IA=AIエージェント"
+      ]
+    },
+    {
+      "id": "fr_numbers",
+      "source_language": "fr",
+      "target_language": "ja",
+      "context": [
+        "A: L'ancien endpoint était sensiblement lent."
+      ],
+      "current": "A: Nous avons réduit la latence de 960 millisecondes à environ 640.",
+      "glossary": [
+        "latence=遅延"
+      ]
+    },
+    {
+      "id": "de_casual",
+      "source_language": "de",
+      "target_language": "ja",
+      "context": [
+        "A: Sind wir wirklich bereit für die Live-Demo?"
+      ],
+      "current": "B: Mehr oder weniger. Klick nur nicht auf diesen Button.",
+      "glossary": []
+    },
+    {
+      "id": "de_tech",
+      "source_language": "de",
+      "target_language": "ja",
+      "context": [
+        "A: Wir bringen den neuen Coding-Agenten zu den Entwicklern."
+      ],
+      "current": "A: Wir veröffentlichen den KI-Agenten nächste Woche.",
+      "glossary": [
+        "KI-Agent=AIエージェント"
+      ]
+    },
+    {
+      "id": "de_negation",
+      "source_language": "de",
+      "target_language": "ja",
+      "context": [
+        "A: Hat das Update den lokalen Modus entfernt?"
+      ],
+      "current": "B: Nein, die lokale Inferenz wird nicht deaktiviert, solange du den Cloud-Fallback nicht einschaltest.",
+      "glossary": [
+        "lokale Inferenz=ローカル推論",
+        "Cloud-Fallback=クラウドフォールバック"
+      ]
+    }
+  ]
+}
