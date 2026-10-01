@@ -100,9 +100,6 @@ actor Engine {
     private var elapsedSamples = 0
     private var utteranceId = 1
     private var utteranceStartMs = 0
-    private var lastEouCount = 0
-    private var committedFullText = ""
-    private var committedTokenCount = 0
     private var lastPartialText = ""
 
     init(writer: JSONWriter) {
@@ -195,15 +192,15 @@ actor Engine {
             _ = try await manager.process(audioBuffer: buffer)
 
             let tokens = await manager.getRawTokenStrings()
-            let tokenTimes = await manager.getTokenTimestampsMs()
-            let fullText = Self.transcript(from: tokens)
-            let currentText = suffix(after: committedFullText, in: fullText)
-            let currentTokens = committedTokenCount < tokens.count ? Array(tokens.dropFirst(committedTokenCount)) : []
-            let currentTokenTimes = committedTokenCount < tokenTimes.count ? Array(tokenTimes.dropFirst(committedTokenCount)) : []
+            let localTokenTimes = await manager.getTokenTimestampsMs()
+            let currentText = Self.transcript(from: tokens)
+            let tokenTimes = localTokenTimes.map { utteranceStartMs + $0 }
             let eouTimes = await manager.getEouTimestampsMs()
 
-            if eouTimes.count > lastEouCount, let endMs = eouTimes.last {
+            if let localEndMs = eouTimes.last {
                 let finalText = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let endMs = utteranceStartMs + localEndMs
+
                 if !finalText.isEmpty {
                     writer.send(
                         Output(
@@ -213,17 +210,19 @@ actor Engine {
                             utteranceId: utteranceId,
                             startMs: utteranceStartMs,
                             endMs: endMs,
-                            tokenStrings: currentTokens,
-                            tokenTimestampsMs: currentTokenTimes
+                            tokenStrings: tokens,
+                            tokenTimestampsMs: tokenTimes
                         )
                     )
                     utteranceId += 1
                 }
 
-                committedFullText = fullText
-                committedTokenCount = tokens.count
+                // FluidAudio reset keeps the loaded models but clears decoder,
+                // audio buffer and accumulated token/EOU history. Resetting at
+                // every confirmed EOU prevents long-running streams from
+                // growing those arrays indefinitely.
+                await manager.reset()
                 utteranceStartMs = endMs
-                lastEouCount = eouTimes.count
                 lastPartialText = ""
                 return
             }
@@ -239,8 +238,8 @@ actor Engine {
                         utteranceId: utteranceId,
                         startMs: utteranceStartMs,
                         endMs: endMs,
-                        tokenStrings: currentTokens,
-                        tokenTimestampsMs: currentTokenTimes
+                        tokenStrings: tokens,
+                        tokenTimestampsMs: tokenTimes
                     )
                 )
             }
@@ -258,9 +257,8 @@ actor Engine {
         guard let manager else { return }
 
         do {
-            let full = try await manager.finish()
+            let remaining = try await manager.finish()
                 .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            let remaining = suffix(after: committedFullText, in: full)
 
             if !remaining.isEmpty {
                 let endMs = (elapsedSamples * 1000) / 16_000
@@ -280,9 +278,6 @@ actor Engine {
             await manager.reset()
             elapsedSamples = 0
             utteranceStartMs = 0
-            lastEouCount = 0
-            committedFullText = ""
-            committedTokenCount = 0
             lastPartialText = ""
         } catch {
             writer.send(
