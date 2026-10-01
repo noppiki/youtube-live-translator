@@ -1,0 +1,121 @@
+{
+  "description": "English→Japanese live-caption benchmark cases. Each case contains the current utterance plus optional recent context.",
+  "cases": [
+    {
+      "id": "tech_ship",
+      "context": [
+        "A: We're bringing the new coding agent to developers.",
+        "B: When does it launch?"
+      ],
+      "current": "A: We're shipping the agent next week.",
+      "glossary": [
+        "agent=AIエージェント",
+        "shipping=リリース/提供開始"
+      ]
+    },
+    {
+      "id": "pronoun",
+      "context": [
+        "A: Sarah finished the migration last night.",
+        "B: Did Mike review it?"
+      ],
+      "current": "A: He did, and she pushed the final patch this morning.",
+      "glossary": []
+    },
+    {
+      "id": "product_name",
+      "context": [
+        "A: We're using FluidAudio with Parakeet for recognition."
+      ],
+      "current": "A: Sortformer handles diarization in parallel.",
+      "glossary": [
+        "FluidAudio=FluidAudio",
+        "Parakeet=Parakeet",
+        "Sortformer=Sortformer",
+        "diarization=話者分離"
+      ]
+    },
+    {
+      "id": "idiom",
+      "context": [
+        "A: The first prototype was pretty rough."
+      ],
+      "current": "A: But after a week of tuning, it finally clicked.",
+      "glossary": []
+    },
+    {
+      "id": "casual",
+      "context": [
+        "A: So, are we actually ready to demo this live?"
+      ],
+      "current": "B: Yeah, more or less. Just don't click that button.",
+      "glossary": []
+    },
+    {
+      "id": "negation",
+      "context": [
+        "A: Did the update remove local mode?"
+      ],
+      "current": "B: No, it doesn't disable local inference unless you turn on cloud fallback.",
+      "glossary": [
+        "local inference=ローカル推論",
+        "cloud fallback=クラウドフォールバック"
+      ]
+    },
+    {
+      "id": "numbers",
+      "context": [
+        "A: The old endpoint was noticeably slow."
+      ],
+      "current": "A: We cut the delay from 960 milliseconds to about 640.",
+      "glossary": []
+    },
+    {
+      "id": "ambiguous_ship",
+      "context": [
+        "A: The hardware batch is already boxed at the warehouse."
+      ],
+      "current": "A: We're shipping the first units next week.",
+      "glossary": [
+        "units=製品"
+      ]
+    },
+    {
+      "id": "ambiguous_run",
+      "context": [
+        "A: This model is small enough for a Mac."
+      ],
+      "current": "B: Can it run comfortably with 32 gigs of unified memory?",
+      "glossary": [
+        "unified memory=ユニファイドメモリ"
+      ]
+    },
+    {
+      "id": "interrupt",
+      "context": [
+        "A: I think the main issue is latency—",
+        "B: Wait, before that, what about translation quality?"
+      ],
+      "current": "A: Right, that's actually the next thing I wanted to fix.",
+      "glossary": []
+    },
+    {
+      "id": "business",
+      "context": [
+        "A: We don't want to raise the subscription price."
+      ],
+      "current": "A: The goal is to improve margins by reducing inference cost instead.",
+      "glossary": [
+        "inference cost=推論コスト"
+      ]
+    },
+    {
+      "id": "subtitle_compact",
+      "context": [
+        "A: We've tried three different approaches and all of them work."
+      ],
+      "current": "A: This one is just easier to maintain, so that's what we're going with.",
+      "glossary": []
+    }
+  ]
+}
