@@ -83,6 +83,8 @@ function ensureOverlay() {
 
 function show() {
   ensureOverlay();
+  clearTimeout(hideTimer);
+  hideTimer = null;
   overlay.classList.add('lt-visible');
 }
 
@@ -251,8 +253,8 @@ function removeUtterance(utteranceId) {
 
   utteranceNodes.delete(utteranceId);
 
-  // Speaker lanes are persistent: clear only if this exact utterance is still
-  // occupying the lane. Pending lanes are disposable.
+  // Pending lanes are disposable. Persistent speaker lanes keep their last
+  // visible text until a newer utterance for that speaker replaces it.
   if (node === pendingLane) {
     node.root.remove();
     pendingLane = null;
@@ -260,7 +262,6 @@ function removeUtterance(utteranceId) {
   }
 
   if (node.utteranceId === utteranceId) {
-    clearLaneText(node);
     node.utteranceId = null;
     delete node.root.dataset.utteranceId;
   }
