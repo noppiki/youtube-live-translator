@@ -7,7 +7,7 @@ Live-caption English → Japanese benchmark for the local translation backend.
 | Alias | Model | Purpose |
 |---|---|---|
 | `gemma3` | `mlx-community/gemma-3-text-4b-it-4bit` | Current baseline |
-| `gemma4e4b` | `Siarhei/gemma-4-E4B-4bit` | Gemma 4 small text-generation candidate |
+| `gemma4e4b` | `DreamFoundries/gemma-4-E4B-it-4bit` | Gemma 4 E4B instruction-tuned text candidate |
 | `gemma4-12b` | `DreamFoundries/gemma-4-12B-it-4bit` | Gemma 4 higher-quality text-generation candidate |
 | `qwen` | `Qwen/Qwen3-4B-MLX-4bit` | Context-aware comparison baseline |
 | `translategemma` | `mlx-community/translategemma-4b-it-4bit` | Translation-specialized reference |
