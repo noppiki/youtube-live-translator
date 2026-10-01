@@ -70,7 +70,7 @@ async function nativeStatus() {
 function effectiveLocalBackend() {
   if (localBackend.value === 'fluid') return 'fluid';
   if (localBackend.value === 'qwen') return 'qwen';
-  return sourceLanguage.value === 'en' ? 'fluid' : 'qwen';
+  return sourceLanguage.value === 'en' && diarization.checked ? 'fluid' : 'qwen';
 }
 
 async function checkLocal(showStatus = false) {
@@ -91,8 +91,8 @@ async function checkLocal(showStatus = false) {
     startLocal.textContent = '起動済み';
     if (showStatus) {
       status.textContent = fluidReady
-        ? '接続済み。音声認識: FluidAudio / Qwen3-ASR、英→日翻訳: Gemma 4 E4B。'
-        : '接続済み。音声認識: Qwen3-ASR、英→日翻訳: Gemma 4 E4B。';
+        ? '接続済み。自動音声認識: Qwen3-ASR優先（話者分離ON時のみFluidAudio）、翻訳: Gemma 4 E4B。'
+        : '接続済み。音声認識: Qwen3-ASR、翻訳: Gemma 4 E4B。';
     }
     return data;
   } catch {
@@ -122,6 +122,8 @@ function updateVisibility() {
   const backend = effectiveLocalBackend();
   const fluid = backend === 'fluid';
   const english = sourceLanguage.value === 'en';
+  const canUseFluidDiarization =
+    english && (localBackend.value === 'fluid' || localBackend.value === 'auto');
 
   apiKeyLabel.style.display = mode === 'local' ? 'none' : 'grid';
   endpointingLabel.style.display = mode === 'local' ? 'none' : 'grid';
@@ -130,11 +132,15 @@ function updateVisibility() {
   domainTermsLabel.style.display = 'grid';
   domainTermsHint.style.display = 'block';
 
-  diarization.disabled = !fluid || !english;
-  if (!fluid || !english) {
+  diarization.disabled = !canUseFluidDiarization;
+  if (!canUseFluidDiarization) {
     diarizationHint.textContent = english
       ? '話者分離を使うにはローカルバックエンドをFluidAudioまたは自動にしてください。'
       : '現在のライブ話者分離は英語＋FluidAudio時のみ利用できます。';
+  } else if (localBackend.value === 'auto') {
+    diarizationHint.textContent = diarization.checked
+      ? '話者分離ONのためFluidAudio＋Sortformerを使用します。'
+      : '自動ではQwen3-ASRを優先します。話者分離をONにするとFluidAudio＋Sortformerへ切り替わります。';
   } else {
     diarizationHint.textContent = 'Sortformerで話者A/B…を推定します。判定は字幕より少し遅れて追従します。';
   }
