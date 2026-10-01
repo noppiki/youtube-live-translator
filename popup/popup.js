@@ -20,6 +20,10 @@ const translationSizeValue = $('#translationSizeValue');
 const diarization = $('#diarization');
 const diarizationLabel = $('#diarizationLabel');
 const diarizationHint = $('#diarizationHint');
+const speakerNameInference = $('#speakerNameInference');
+const speakerNameInferenceLabel = $('#speakerNameInferenceLabel');
+const speakerNameInferenceHint = $('#speakerNameInferenceHint');
+const prepareSpeakerAI = $('#prepareSpeakerAI');
 const domainTerms = $('#domainTerms');
 const domainTermsLabel = $('#domainTermsLabel');
 const domainTermsHint = $('#domainTermsHint');
@@ -38,6 +42,7 @@ const DEFAULTS = {
   targetLanguage: 'ja',
   translationSize: 100,
   diarization: false,
+  speakerNameInference: true,
   domainTerms: 'OpenAI\nAnthropic\nClaude\nGemini\nCursor\nCodex\nMCP\nNVIDIA',
   endpointingMs: 350
 };
@@ -130,6 +135,13 @@ function updateVisibility() {
     diarizationHint.textContent = 'Sortformerで話者A/B…を推定します。判定は字幕より少し遅れて追従します。';
   }
 
+  const canInferNames = fluid && english && diarization.checked;
+  speakerNameInference.disabled = !canInferNames;
+  prepareSpeakerAI.disabled = !canInferNames || !speakerNameInference.checked;
+  speakerNameInferenceHint.textContent = canInferNames
+    ? '会話・配信タイトル・チャンネル名・概要欄から推定します。確信度が低い場合は「名前?」または役割名で表示します。'
+    : '話者名推定は、英語＋FluidAudio＋話者分離ONのとき利用できます。';
+
   installModel.textContent = fluid ? (diarization.checked ? 'ASR＋話者モデル準備' : 'ASRモデル準備') : 'Qwen3モデル準備';
 }
 
@@ -149,6 +161,7 @@ async function load() {
   translationSize.value = String(stored.translationSize || 100);
   translationSizeValue.value = `${translationSize.value}%`;
   diarization.checked = Boolean(stored.diarization);
+  speakerNameInference.checked = Boolean(stored.speakerNameInference);
   domainTerms.value = stored.domainTerms || '';
   endpointingMs.value = String(stored.endpointingMs || 350);
 
@@ -168,6 +181,7 @@ function readSettings() {
     targetLanguage: targetLanguage.value,
     translationSize: Number(translationSize.value),
     diarization: Boolean(diarization.checked),
+    speakerNameInference: Boolean(speakerNameInference.checked),
     domainTerms: domainTerms.value,
     endpointingMs: Number(endpointingMs.value)
   };
@@ -268,6 +282,52 @@ copyInstall.addEventListener('click', async () => {
 
 translationSize.addEventListener('input', sendSizeToActiveTab);
 
+async function prepareSpeakerNameAI({ silent = false } = {}) {
+  if (!speakerNameInference.checked) return true;
+
+  if (!('LanguageModel' in globalThis)) {
+    if (!silent) status.textContent = 'Chrome内蔵の名前推定AIはこの環境では利用できません。明示的な自己紹介のみ推定します。';
+    return false;
+  }
+
+  const options = {
+    expectedInputs: [{ type: 'text', languages: ['en', 'ja'] }],
+    expectedOutputs: [{ type: 'text', languages: ['en'] }]
+  };
+
+  try {
+    const availability = await LanguageModel.availability(options);
+    if (availability === 'unavailable') {
+      if (!silent) status.textContent = '名前推定AIはこの端末では利用できません。明示的な自己紹介のみ推定します。';
+      return false;
+    }
+
+    if (!silent) {
+      status.textContent = availability === 'available'
+        ? '名前推定AIを確認しています…'
+        : '名前推定AIをダウンロードしています…';
+    }
+
+    const session = await LanguageModel.create({
+      ...options,
+      monitor(monitor) {
+        monitor.addEventListener('downloadprogress', (event) => {
+          if (!silent) status.textContent = `名前推定AIを準備中… ${Math.round((event.loaded || 0) * 100)}%`;
+        });
+      }
+    });
+    session.destroy?.();
+
+    if (!silent) status.textContent = '名前推定AIの準備が完了しました。';
+    return true;
+  } catch (error) {
+    if (!silent) status.textContent = `名前推定AI: ${error?.message || error}`;
+    return false;
+  }
+}
+
+prepareSpeakerAI.addEventListener('click', () => prepareSpeakerNameAI({ silent: false }));
+
 startButton.addEventListener('click', async () => {
   const settings = readSettings();
 
@@ -286,6 +346,10 @@ startButton.addEventListener('click', async () => {
   if (settings.diarization && (backend !== 'fluid' || settings.sourceLanguage !== 'en')) {
     status.textContent = '話者分離は英語＋FluidAudio時のみ利用できます。';
     return;
+  }
+
+  if (settings.speakerNameInference && settings.diarization) {
+    await prepareSpeakerNameAI({ silent: true });
   }
 
   await saveSettings();
@@ -318,7 +382,7 @@ stopButton.addEventListener('click', async () => {
 
 for (const control of [
   engineMode, localBackend, localModel, apiKey, sourceLanguage,
-  targetLanguage, diarization, domainTerms, endpointingMs
+  targetLanguage, diarization, speakerNameInference, domainTerms, endpointingMs
 ]) {
   control.addEventListener('change', async () => {
     updateVisibility();
