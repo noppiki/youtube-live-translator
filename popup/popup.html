@@ -29,8 +29,8 @@
       <label>
         音声認識バックエンド
         <select id="localBackend">
-          <option value="auto">自動（英語: FluidAudio / その他: Qwen3）</option>
-          <option value="fluid">FluidAudio（英語・低遅延・話者分離）</option>
+          <option value="auto">自動（Qwen3優先 / 話者分離ON時のみFluidAudio）</option>
+          <option value="fluid">FluidAudio（英語・話者分離向け）</option>
           <option value="qwen">Qwen3-ASR（多言語・専門用語context）</option>
         </select>
       </label>
@@ -49,7 +49,7 @@
         <input id="diarization" type="checkbox">
         <span>話者分離（FluidAudio Sortformer）</span>
       </label>
-      <p class="hint" id="diarizationHint">英語＋FluidAudio時に利用できます。話者ラベルは少し遅れて確定します。</p>
+      <p class="hint" id="diarizationHint">自動モードでは通常Qwen3-ASRを使い、英語で話者分離をONにしたときだけFluidAudio＋Sortformerへ切り替えます。</p>
 
       <label class="checkLabel" id="speakerNameInferenceLabel">
         <input id="speakerNameInference" type="checkbox" checked>
