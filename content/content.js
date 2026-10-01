@@ -2,8 +2,11 @@ let overlay;
 let utteranceList;
 let statusEl;
 let hideTimer;
+
 const utteranceNodes = new Map();
+const speakerLanes = new Map();
 const speakerProfiles = new Map();
+let pendingLane = null;
 
 function clampSize(value) {
   const n = Number(value);
@@ -91,14 +94,12 @@ function scheduleHide(ms = 7000) {
   }, ms);
 }
 
-function createUtteranceNode(utteranceId) {
+function createLane(speakerIndex = null) {
   const root = document.createElement('div');
   root.className = 'lt-utterance';
-  root.dataset.utteranceId = String(utteranceId);
 
   const speaker = document.createElement('div');
   speaker.className = 'lt-utterance-speaker';
-  speaker.textContent = '話者 ?';
 
   const body = document.createElement('div');
   body.className = 'lt-utterance-body';
@@ -111,30 +112,103 @@ function createUtteranceNode(utteranceId) {
 
   body.append(original, translated);
   root.append(speaker, body);
-
   utteranceList.appendChild(root);
-  utteranceNodes.set(utteranceId, { root, speaker, original, translated, final: false });
-  trimUtterances();
-  return utteranceNodes.get(utteranceId);
+
+  const node = {
+    root,
+    speaker,
+    original,
+    translated,
+    speakerIndex: Number.isInteger(speakerIndex) ? speakerIndex : null,
+    utteranceId: null,
+    final: false
+  };
+  paintSpeaker(node);
+  return node;
 }
 
-function trimUtterances() {
-  const entries = [...utteranceNodes.entries()];
-  while (entries.length > 3) {
-    const [id, node] = entries.shift();
-    node.root.remove();
-    utteranceNodes.delete(id);
+function paintSpeaker(node) {
+  node.speaker.textContent = speakerName(node.speakerIndex);
+  node.speaker.style.setProperty('--lt-speaker-hue', String(speakerHue(node.speakerIndex)));
+  node.speaker.classList.toggle('lt-speaker-pending', !Number.isInteger(node.speakerIndex));
+}
+
+function clearLaneText(node) {
+  node.original.textContent = '';
+  node.translated.textContent = '';
+  node.root.classList.remove('lt-translating', 'lt-final');
+  node.root.classList.add('lt-partial');
+}
+
+function bindUtterance(node, utteranceId) {
+  if (Number.isInteger(node.utteranceId)) {
+    utteranceNodes.delete(node.utteranceId);
   }
+  node.utteranceId = utteranceId;
+  node.root.dataset.utteranceId = String(utteranceId);
+  utteranceNodes.set(utteranceId, node);
+}
+
+function laneFor(utteranceId, speakerIndex) {
+  if (Number.isInteger(speakerIndex)) {
+    let lane = speakerLanes.get(speakerIndex);
+    const existing = utteranceNodes.get(utteranceId);
+
+    if (!lane) {
+      if (existing && existing === pendingLane) {
+        lane = existing;
+        pendingLane = null;
+        lane.speakerIndex = speakerIndex;
+        paintSpeaker(lane);
+      } else {
+        lane = createLane(speakerIndex);
+      }
+      speakerLanes.set(speakerIndex, lane);
+    } else if (existing && existing !== lane && existing === pendingLane) {
+      existing.root.remove();
+      utteranceNodes.delete(utteranceId);
+      pendingLane = null;
+    }
+
+    if (lane.utteranceId !== utteranceId) {
+      clearLaneText(lane);
+      bindUtterance(lane, utteranceId);
+    }
+    return lane;
+  }
+
+  const existing = utteranceNodes.get(utteranceId);
+  if (existing) return existing;
+
+  if (!pendingLane) {
+    pendingLane = createLane(null);
+  }
+  if (pendingLane.utteranceId !== utteranceId) {
+    clearLaneText(pendingLane);
+    bindUtterance(pendingLane, utteranceId);
+  }
+  return pendingLane;
 }
 
 function updateSpeaker(utteranceId, speakerIndex) {
-  const node = utteranceNodes.get(utteranceId);
-  if (!node) return;
+  if (!Number.isInteger(speakerIndex)) return;
+  const oldNode = utteranceNodes.get(utteranceId);
+  const oldOriginal = oldNode?.original.textContent || '';
+  const oldTranslated = oldNode?.translated.textContent || '';
+  const oldFinal = Boolean(oldNode?.final);
 
-  node.speakerIndex = Number.isInteger(speakerIndex) ? speakerIndex : null;
-  node.speaker.textContent = speakerName(node.speakerIndex);
-  node.speaker.style.setProperty('--lt-speaker-hue', String(speakerHue(speakerIndex)));
-  node.speaker.classList.toggle('lt-speaker-pending', !Number.isInteger(speakerIndex));
+  const lane = laneFor(utteranceId, speakerIndex);
+  lane.speakerIndex = speakerIndex;
+  paintSpeaker(lane);
+
+  if (oldNode && oldNode !== lane) {
+    oldNode.root.remove();
+    if (oldNode === pendingLane) pendingLane = null;
+  }
+
+  if (oldOriginal) lane.original.textContent = oldOriginal;
+  if (oldTranslated) lane.translated.textContent = oldTranslated;
+  lane.final = oldFinal;
 }
 
 function upsertUtterance(message) {
@@ -143,7 +217,8 @@ function upsertUtterance(message) {
   const utteranceId = Number(message.utteranceId);
   if (!Number.isInteger(utteranceId)) return;
 
-  const node = utteranceNodes.get(utteranceId) || createUtteranceNode(utteranceId);
+  const speakerIndex = Number.isInteger(message.speaker) ? message.speaker : null;
+  const node = laneFor(utteranceId, speakerIndex);
 
   if (typeof message.original === 'string' && message.original) {
     node.original.textContent = message.original;
@@ -155,10 +230,9 @@ function upsertUtterance(message) {
 
   node.root.classList.toggle('lt-translating', Boolean(message.translationPending));
 
-  if (Number.isInteger(message.speaker)) {
-    updateSpeaker(utteranceId, message.speaker);
-  } else if (!node.speaker.textContent) {
-    updateSpeaker(utteranceId, null);
+  if (Number.isInteger(speakerIndex)) {
+    node.speakerIndex = speakerIndex;
+    paintSpeaker(node);
   }
 
   node.final = Boolean(message.final);
@@ -167,9 +241,29 @@ function upsertUtterance(message) {
 
   statusEl.textContent = '';
   show();
-  trimUtterances();
 
   if (node.final) scheduleHide(9000);
+}
+
+function removeUtterance(utteranceId) {
+  const node = utteranceNodes.get(utteranceId);
+  if (!node) return;
+
+  utteranceNodes.delete(utteranceId);
+
+  // Speaker lanes are persistent: clear only if this exact utterance is still
+  // occupying the lane. Pending lanes are disposable.
+  if (node === pendingLane) {
+    node.root.remove();
+    pendingLane = null;
+    return;
+  }
+
+  if (node.utteranceId === utteranceId) {
+    clearLaneText(node);
+    node.utteranceId = null;
+    delete node.root.dataset.utteranceId;
+  }
 }
 
 function applySpeakerProfile(message) {
@@ -182,9 +276,8 @@ function applySpeakerProfile(message) {
     source: message.source || ''
   });
 
-  for (const [utteranceId, node] of utteranceNodes.entries()) {
-    if (node.speakerIndex === message.speaker) updateSpeaker(utteranceId, message.speaker);
-  }
+  const lane = speakerLanes.get(message.speaker);
+  if (lane) paintSpeaker(lane);
 }
 
 function getPageContext() {
@@ -212,8 +305,15 @@ function getPageContext() {
 }
 
 function clearUtterances() {
-  for (const node of utteranceNodes.values()) node.root.remove();
+  for (const node of new Set(utteranceNodes.values())) node.root.remove();
+  for (const node of speakerLanes.values()) {
+    if (node.root.isConnected) node.root.remove();
+  }
+  if (pendingLane?.root.isConnected) pendingLane.root.remove();
+
   utteranceNodes.clear();
+  speakerLanes.clear();
+  pendingLane = null;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -235,12 +335,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'LT_UTTERANCE_REMOVE') {
-    const utteranceId = Number(message.utteranceId);
-    const node = utteranceNodes.get(utteranceId);
-    if (node) {
-      node.root.remove();
-      utteranceNodes.delete(utteranceId);
-    }
+    removeUtterance(Number(message.utteranceId));
     return;
   }
 
