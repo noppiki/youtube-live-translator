@@ -111,7 +111,7 @@ actor Engine {
 
         let asr = StreamingEouAsrManager(
             chunkSize: .ms320,
-            eouDebounceMs: 960
+            eouDebounceMs: 640
         )
         try await asr.loadModels()
         manager = asr
