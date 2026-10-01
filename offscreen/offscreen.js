@@ -162,11 +162,61 @@ async function getTranslator(sourceLanguage, targetLanguage) {
   return translator;
 }
 
+function translationContext() {
+  return finalizedConversation.slice(-3).map((item) => {
+    const speaker = Number.isInteger(item.speaker)
+      ? `Speaker ${String.fromCharCode(65 + (item.speaker % 26))}`
+      : 'Speaker';
+    return `${speaker}: ${item.text}`;
+  });
+}
+
+function translationGlossary() {
+  return String(settings?.domainTerms || '')
+    .split(/\n|,/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+async function translateWithLocalGemma(text, source, target) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch('http://127.0.0.1:8765/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        sourceLanguage: source,
+        targetLanguage: target,
+        context: translationContext(),
+        glossary: translationGlossary()
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    if (!data?.translated) throw new Error('ローカル翻訳が空の結果を返しました。');
+    return data.translated;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function translateText(text, sourceLanguage) {
   if (!text?.trim()) return '';
   const source = normalizeSourceLanguage(sourceLanguage);
   const target = settings.targetLanguage || 'ja';
   if (source === target) return text;
+
+  // Benchmark winner for the primary English → Japanese live-caption path.
+  // Fall back to Chrome Translator if the local model/service is unavailable.
+  if (source === 'en' && target === 'ja') {
+    try {
+      return await translateWithLocalGemma(text, source, target);
+    } catch {}
+  }
+
   const translator = await getTranslator(source, target);
   return translator ? translator.translate(text) : text;
 }
