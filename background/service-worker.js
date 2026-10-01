@@ -41,13 +41,16 @@ async function startCapture(settings) {
   const tab = await getActiveYoutubeTab();
   await ensureOffscreenDocument();
 
+  const pageContext = await chrome.tabs.sendMessage(tab.id, { type: 'LT_GET_PAGE_CONTEXT' })
+    .catch(() => ({}));
+
   const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
   const response = await chrome.runtime.sendMessage({
     target: 'offscreen',
     type: 'START_CAPTURE',
     streamId,
     tabId: tab.id,
-    settings
+    settings: { ...settings, pageContext }
   });
 
   if (!response?.ok) throw new Error(response?.error || '翻訳を開始できませんでした。');
