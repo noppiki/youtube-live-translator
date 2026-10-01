@@ -1,66 +1,161 @@
 # Live Translator for YouTube
 
-YouTube Live のタブ音声を Chrome 拡張から取得し、Deepgram Nova-3 でリアルタイム文字起こし、Chrome の組み込み Translator API で翻訳して動画上へ字幕表示する Manifest V3 拡張です。
+YouTube Live のタブ音声をリアルタイム文字起こしし、Chrome の組み込み Translator API で翻訳字幕を動画上へ表示する Manifest V3 拡張です。
 
-## 現在の構成
+## v0.2: ローカルAI対応
+
+デフォルトは **ローカル優先** です。
+
+1. Apple Silicon Mac 上の Qwen3-ASR MLX を探す
+2. 接続できればローカルSTTを使用（API料金なし）
+3. 接続できず Deepgram APIキーが設定されていれば Nova-3 へ自動フォールバック
+4. 翻訳は Chrome Translator API を使用
+
+### 推奨モデル
+
+- バランス: `moona3k/mlx-qwen3-asr-0.6b-4bit`（約517MB）
+- 高精度: `moona3k/mlx-qwen3-asr-1.7b-4bit`（約1.2GB）
+
+0.6B 4-bit はデコーダ4-bit + 音声エンコーダ8-bitの量子化を使い、軽量化しながら音声認識精度の低下を抑えたモデルです。
+
+## 構成
 
 - 音声取得: `chrome.tabCapture`
 - 長時間音声処理: `chrome.offscreen`
-- STT: Deepgram Streaming STT / Nova-3
-- 翻訳: Chrome Translator API（オンデバイスの言語パック）
-- 字幕描画: YouTube ページ上の content script
-- 入力音声は 16 kHz / mono / Linear16 に変換して WebSocket 送信
+- ローカルSTT: Qwen3-ASR / MLX
+- クラウドSTT: Deepgram Nova-3（任意・フォールバック）
+- 翻訳: Chrome Translator API
+- 字幕描画: YouTubeページ上のcontent script
+- 音声: PCM16 / mono / 16kHz
+- ローカル通信: `ws://127.0.0.1:8765/stream`
 
-## 必要環境
+## Chrome拡張の導入
 
-- デスクトップ版 Chrome 138 以降
-- Deepgram API キー
-- YouTube (`https://www.youtube.com/`)
+1. このリポジトリをcloneまたはZIPで取得
+2. Chromeで `chrome://extensions` を開く
+3. 「デベロッパー モード」をON
+4. 「パッケージ化されていない拡張機能を読み込む」
+5. このリポジトリのフォルダを選択
 
-Chrome Translator API は初回使用時に対象言語のモデル/言語パックをダウンロードする場合があります。
+## ローカルエンジンの導入（Apple Silicon Mac）
 
-## インストール
+拡張の「初回インストール」に表示されるコマンド、または以下をターミナルへ1回貼り付けます。
 
-1. Chrome で `chrome://extensions` を開く
-2. 右上の「デベロッパー モード」を ON
-3. 「パッケージ化されていない拡張機能を読み込む」
-4. このフォルダ `youtube-live-translator` を選択
-5. YouTube Live を開く
-6. 拡張ボタンを押す
-7. Deepgram API キーを入力
-8. 「翻訳開始」
+```bash
+curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash
+```
 
-## 注意: API キー
+インストーラは以下を行います。
 
-この MVP は個人利用を最短で試すため、Deepgram API キーを `chrome.storage.local` に保存し、ブラウザ WebSocket の `Sec-WebSocket-Protocol` で Deepgram に渡します。
+- `uv` の確認/導入
+- Python 3.12の隔離環境作成
+- `mlx-qwen3-asr` とローカルサーバー依存関係の導入
+- 推奨0.6Bモデルのダウンロード
+- `127.0.0.1:8765` のローカルサーバー設置
+- macOS LaunchAgent登録
+- Macログイン時の自動起動
 
-Chrome Web Store などで第三者へ配布する版では、固定 API キーを拡張へ入れてはいけません。バックエンドから短期トークンを発行する構成へ変更してください。
+ファイルは原則ここへまとめます。
 
-## ライブ字幕の動作
+```
+~/Library/Application Support/YouTubeLiveTranslator/
+```
 
-Deepgram では `interim_results=true` を使い、発話途中の暫定字幕を表示します。`endpointing` はポップアップから 220 / 350 / 500 ms を選択できます。
+システムPythonは変更しません。
 
-- 220ms: 最速、細切れになりやすい
-- 350ms: バランス
-- 500ms: 自然、少し遅い
+### アンインストール
 
-## 次に入れたい機能
+```bash
+curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/uninstall-macos.sh | bash
+```
 
-- YouTube に公式ライブ字幕がある場合は STT を使わず直接翻訳
-- Deepgram の短期トークン発行サーバー
-- 原文字幕 ON/OFF
-- 字幕位置・文字サイズ・背景透明度
-- Twitch / X Live / その他サイト対応
-- 文脈バッファ付き自然翻訳モード
-- 字幕ログ保存 / SRT・VTT 出力
+## 拡張からできること
 
-## 権限
+### 音声認識モード
 
-- `activeTab`: ユーザーが開始した現在の YouTube タブを対象にする
-- `tabCapture`: タブ音声を取得
-- `offscreen`: バックグラウンドで Web Audio を維持
-- `storage`: 設定保存
-- host permissions: YouTube と Deepgram のみ
+- **自動（推奨）**: ローカル → Deepgram
+- **ローカルのみ**: 完全無料
+- **Deepgramのみ**: クラウドSTT固定
+
+### ローカルモデル
+
+設定画面から次のモデルを選び、「モデル準備」を押すとダウンロード/ロードできます。
+
+- Qwen3-ASR 0.6B 4-bit
+- Qwen3-ASR 1.7B 4-bit
+
+### 固有名詞・専門用語
+
+改行区切りで入力した語句をQwen3-ASRの `context` に渡します。
+
+例:
+
+```
+OpenAI
+Anthropic
+Claude
+Gemini
+Cursor
+Codex
+MCP
+NVIDIA
+```
+
+技術系ライブなどで固有名詞の認識改善に使えます。
+
+## ローカルAPI
+
+### ヘルスチェック
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+### モデル一覧
+
+```bash
+curl http://127.0.0.1:8765/models
+```
+
+### Streaming WebSocket
+
+```
+ws://127.0.0.1:8765/stream
+```
+
+PCM16 / mono / 16kHz をbinary frameとして送信します。最初にJSON設定を送ります。
+
+```json
+{
+  "type": "config",
+  "model": "moona3k/mlx-qwen3-asr-0.6b-4bit",
+  "language": "English",
+  "context": "OpenAI Anthropic Claude Cursor",
+  "chunkSizeSec": 1.0,
+  "maxContextSec": 30.0
+}
+```
+
+## Deepgram
+
+ローカルエンジンを使わない場合、または自動モードのフォールバックとしてDeepgram Nova-3を利用できます。
+
+Deepgram APIキーは `chrome.storage.local` へ保存します。公開配布向けに共有APIキーを拡張へ埋め込まないでください。
+
+## セキュリティ
+
+ローカルサーバーは `127.0.0.1` のみにbindします。WebSocket/モデル操作はChrome拡張Originからの利用を想定しています。
+
+インストールスクリプトを `curl | bash` で実行したくない場合は、内容を確認してからローカルで実行してください。
+
+## 今後
+
+- YouTube公式ライブ字幕が存在する場合はSTTを省略
+- 字幕の文脈バッファ/自然化
+- 原文字幕ON/OFF、位置、サイズ、背景調整
+- Twitch / X Live対応
+- SRT / VTTログ保存
+- Windows向けローカルエンジン
 
 ## License
 
