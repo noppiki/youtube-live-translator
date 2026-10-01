@@ -3,7 +3,8 @@ let audioContext = null;
 let sourceNode = null;
 let workletNode = null;
 let muteGain = null;
-let deepgramSocket = null;
+let activeSocket = null;
+let activeProvider = null;
 let keepAliveTimer = null;
 let currentTabId = null;
 let running = false;
@@ -12,19 +13,21 @@ let finalizedPieces = [];
 let translatorCache = new Map();
 let translateSequence = 0;
 
-function postToTab(type, payload = {}) {
-  if (!currentTabId) return;
-  chrome.tabs?.sendMessage?.(currentTabId, { type, ...payload }).catch?.(() => {});
-}
+const LANGUAGE_CODES = {
+  English: 'en', Japanese: 'ja', Korean: 'ko', Chinese: 'zh',
+  Spanish: 'es', French: 'fr', German: 'de', Italian: 'it',
+  Portuguese: 'pt', Russian: 'ru', Arabic: 'ar', Hindi: 'hi',
+  Dutch: 'nl', Turkish: 'tr', Thai: 'th', Vietnamese: 'vi',
+  Indonesian: 'id', Malay: 'ms'
+};
 
-// Offscreen documents only expose chrome.runtime. Route through the service worker.
-async function relayToTab(message) {
-  await chrome.runtime.sendMessage({
-    target: 'background-relay',
-    ...message,
-    tabId: currentTabId
-  }).catch(() => {});
-}
+const QWEN_LANGUAGES = {
+  en: 'English', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
+  es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
+  pt: 'Portuguese', ru: 'Russian', ar: 'Arabic', hi: 'Hindi',
+  nl: 'Dutch', tr: 'Turkish', th: 'Thai', vi: 'Vietnamese',
+  id: 'Indonesian', ms: 'Malay'
+};
 
 function sendOverlay(type, payload = {}) {
   chrome.runtime.sendMessage({
@@ -45,8 +48,6 @@ function floatTo16BitPCM(float32) {
 
 function downsampleBuffer(buffer, inputRate, outputRate) {
   if (outputRate === inputRate) return buffer;
-  if (outputRate > inputRate) throw new Error('Output rate must be <= input rate');
-
   const ratio = inputRate / outputRate;
   const newLength = Math.round(buffer.length / ratio);
   const result = new Float32Array(newLength);
@@ -68,39 +69,34 @@ function downsampleBuffer(buffer, inputRate, outputRate) {
   return result;
 }
 
-function buildDeepgramUrl() {
-  const params = new URLSearchParams({
-    model: 'nova-3',
-    encoding: 'linear16',
-    sample_rate: '16000',
-    channels: '1',
-    interim_results: 'true',
-    endpointing: String(settings.endpointingMs || 350),
-    punctuate: 'true',
-    smart_format: 'true'
-  });
-
-  if (settings.sourceLanguage === 'auto') {
-    params.set('detect_language', 'true');
-  } else if (settings.sourceLanguage === 'multi') {
-    params.set('language', 'multi');
-  } else {
-    params.set('language', settings.sourceLanguage || 'en');
+function normalizeSourceLanguage(language) {
+  if (LANGUAGE_CODES[language]) return LANGUAGE_CODES[language];
+  if (!language || language === 'auto' || language === 'multi') {
+    return settings.sourceLanguage === 'auto' || settings.sourceLanguage === 'multi'
+      ? 'en'
+      : settings.sourceLanguage;
   }
-
-  return `wss://api.deepgram.com/v1/listen?${params.toString()}`;
+  const lower = String(language).toLowerCase();
+  if (LANGUAGE_CODES[language]) return LANGUAGE_CODES[language];
+  if (/^[a-z]{2}(-[A-Z]{2})?$/.test(String(language))) return lower.slice(0, 2);
+  return lower;
 }
 
-function normalizeSourceLanguage(language) {
-  if (!language) return settings.sourceLanguage === 'auto' ? 'en' : settings.sourceLanguage;
-  return language.split('-')[0].toLowerCase();
+function recentTranscript(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= 260) return clean;
+  const tail = clean.slice(-260);
+  const cut = tail.search(/[.!?。！？]\s+/);
+  return cut >= 0 ? tail.slice(cut + 1).trim() : tail;
 }
 
 async function getTranslator(sourceLanguage, targetLanguage) {
   const source = normalizeSourceLanguage(sourceLanguage);
   const target = (targetLanguage || 'ja').split('-')[0].toLowerCase();
   if (source === target) return null;
-  if (!('Translator' in self)) throw new Error('Chrome Translator API が利用できません。Chrome 138+ のデスクトップ版を使用してください。');
+  if (!('Translator' in self)) {
+    throw new Error('Chrome Translator API が利用できません。Chrome 138+ のデスクトップ版を使用してください。');
+  }
 
   const key = `${source}->${target}`;
   if (translatorCache.has(key)) return translatorCache.get(key);
@@ -136,14 +132,16 @@ async function translateText(text, sourceLanguage) {
 }
 
 async function emitSubtitle(text, sourceLanguage, final) {
+  const displayText = recentTranscript(text);
+  if (!displayText) return;
   const sequence = ++translateSequence;
-  sendOverlay('LT_TRANSCRIPT', { text, final });
+  sendOverlay('LT_TRANSCRIPT', { text: displayText, final });
 
   try {
-    const translated = await translateText(text, sourceLanguage);
-    if (!running || sequence < translateSequence - 8) return;
+    const translated = await translateText(displayText, sourceLanguage);
+    if (!running || sequence < translateSequence - 4) return;
     sendOverlay('LT_TRANSLATION', {
-      original: text,
+      original: displayText,
       translated,
       final,
       sourceLanguage: normalizeSourceLanguage(sourceLanguage)
@@ -153,18 +151,32 @@ async function emitSubtitle(text, sourceLanguage, final) {
   }
 }
 
+function buildDeepgramUrl() {
+  const params = new URLSearchParams({
+    model: 'nova-3',
+    encoding: 'linear16',
+    sample_rate: '16000',
+    channels: '1',
+    interim_results: 'true',
+    endpointing: String(settings.endpointingMs || 350),
+    punctuate: 'true',
+    smart_format: 'true'
+  });
+
+  if (settings.sourceLanguage === 'auto') params.set('detect_language', 'true');
+  else if (settings.sourceLanguage === 'multi') params.set('language', 'multi');
+  else params.set('language', settings.sourceLanguage || 'en');
+
+  return `wss://api.deepgram.com/v1/listen?${params.toString()}`;
+}
+
 function handleDeepgramMessage(event) {
   let data;
-  try {
-    data = JSON.parse(event.data);
-  } catch {
-    return;
-  }
+  try { data = JSON.parse(event.data); } catch { return; }
 
   if (data.type === 'Results') {
     const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
     if (!transcript) return;
-
     const detected = data.channel?.detected_language || data.channel?.alternatives?.[0]?.languages?.[0];
 
     if (data.is_final) {
@@ -181,56 +193,135 @@ function handleDeepgramMessage(event) {
       emitSubtitle(`${prefix}${transcript}`.trim(), detected, false);
     }
   }
-
-  if (data.type === 'Metadata') {
-    sendOverlay('LT_STATUS', { state: 'running', message: 'ライブ翻訳中' });
-  }
 }
 
 function openDeepgramSocket() {
   return new Promise((resolve, reject) => {
+    if (!settings.deepgramApiKey) {
+      reject(new Error('Deepgram APIキーが未設定です。'));
+      return;
+    }
+
     const socket = new WebSocket(buildDeepgramUrl(), ['token', settings.deepgramApiKey]);
     socket.binaryType = 'arraybuffer';
-
     const timeout = setTimeout(() => reject(new Error('Deepgram 接続がタイムアウトしました。')), 10000);
 
     socket.onopen = () => {
       clearTimeout(timeout);
-      deepgramSocket = socket;
+      activeSocket = socket;
+      activeProvider = 'deepgram';
       keepAliveTimer = setInterval(() => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'KeepAlive' }));
-        }
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'KeepAlive' }));
       }, 8000);
       resolve();
     };
-
     socket.onmessage = handleDeepgramMessage;
     socket.onerror = () => {
       clearTimeout(timeout);
-      reject(new Error('Deepgram に接続できませんでした。APIキーを確認してください。'));
+      reject(new Error('Deepgram に接続できませんでした。'));
     };
     socket.onclose = (event) => {
       clearInterval(keepAliveTimer);
       keepAliveTimer = null;
-      if (running) {
-        sendOverlay('LT_STATUS', {
-          state: 'error',
-          message: `Deepgram 接続が終了しました (${event.code})`
-        });
+      if (running && activeProvider === 'deepgram') {
+        sendOverlay('LT_STATUS', { state: 'error', message: `Deepgram 接続終了 (${event.code})` });
       }
     };
   });
 }
 
+function openLocalSocket() {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket('ws://127.0.0.1:8765/stream');
+    socket.binaryType = 'arraybuffer';
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        socket.close();
+        reject(new Error('ローカルエンジン接続タイムアウト'));
+      }
+    }, 8000);
+
+    socket.onopen = () => {
+      const language = QWEN_LANGUAGES[settings.sourceLanguage] || null;
+      const context = String(settings.domainTerms || '')
+        .split(/\n|,/)
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .join(' ');
+      socket.send(JSON.stringify({
+        type: 'config',
+        model: settings.localModel || 'moona3k/mlx-qwen3-asr-0.6b-4bit',
+        language,
+        context,
+        chunkSizeSec: 1.0,
+        maxContextSec: 30.0
+      }));
+    };
+
+    socket.onmessage = (event) => {
+      let data;
+      try { data = JSON.parse(event.data); } catch { return; }
+
+      if (data.type === 'ready') {
+        clearTimeout(timeout);
+        if (!settled) {
+          settled = true;
+          activeSocket = socket;
+          activeProvider = 'local';
+          resolve();
+        }
+        return;
+      }
+      if (data.type === 'partial' || data.type === 'final') {
+        emitSubtitle(data.text || data.stableText || '', data.language, data.type === 'final');
+      } else if (data.type === 'error') {
+        sendOverlay('LT_STATUS', { state: 'error', message: `ローカルSTT: ${data.message}` });
+      }
+    };
+
+    socket.onerror = () => {
+      clearTimeout(timeout);
+      if (!settled) {
+        settled = true;
+        reject(new Error('ローカルエンジンが見つかりません。'));
+      }
+    };
+    socket.onclose = () => {
+      if (running && activeProvider === 'local') {
+        sendOverlay('LT_STATUS', { state: 'error', message: 'ローカルSTTとの接続が終了しました。' });
+      }
+    };
+  });
+}
+
+async function openProvider() {
+  const mode = settings.engineMode || 'auto';
+
+  if (mode === 'local') {
+    await openLocalSocket();
+    return;
+  }
+  if (mode === 'deepgram') {
+    await openDeepgramSocket();
+    return;
+  }
+
+  try {
+    await openLocalSocket();
+  } catch (localError) {
+    if (!settings.deepgramApiKey) {
+      throw new Error(`${localError.message} Deepgram APIキーも未設定です。`);
+    }
+    sendOverlay('LT_STATUS', { state: 'starting', message: 'ローカル未接続。Deepgramへ切り替えます…' });
+    await openDeepgramSocket();
+  }
+}
+
 async function setupAudio(streamId) {
   mediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      mandatory: {
-        chromeMediaSource: 'tab',
-        chromeMediaSourceId: streamId
-      }
-    },
+    audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } },
     video: false
   });
 
@@ -238,8 +329,6 @@ async function setupAudio(streamId) {
   await audioContext.audioWorklet.addModule(chrome.runtime.getURL('offscreen/pcm-worklet.js'));
 
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
-
-  // Preserve original tab audio for the viewer.
   sourceNode.connect(audioContext.destination);
 
   workletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
@@ -249,11 +338,11 @@ async function setupAudio(streamId) {
   sourceNode.connect(workletNode);
 
   workletNode.port.onmessage = (event) => {
-    if (!running || !deepgramSocket || deepgramSocket.readyState !== WebSocket.OPEN) return;
+    if (!running || !activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
     const input = event.data instanceof Float32Array ? event.data : new Float32Array(event.data);
     const downsampled = downsampleBuffer(input, audioContext.sampleRate, 16000);
     const pcm16 = floatTo16BitPCM(downsampled);
-    deepgramSocket.send(pcm16.buffer);
+    activeSocket.send(pcm16.buffer);
   };
 }
 
@@ -262,16 +351,20 @@ async function stopAll() {
   finalizedPieces = [];
   translateSequence += 1000;
 
-  if (deepgramSocket) {
+  if (activeSocket) {
     try {
-      if (deepgramSocket.readyState === WebSocket.OPEN) {
-        deepgramSocket.send(JSON.stringify({ type: 'Finalize' }));
-        deepgramSocket.send(JSON.stringify({ type: 'CloseStream' }));
+      if (activeSocket.readyState === WebSocket.OPEN) {
+        if (activeProvider === 'local') activeSocket.send(JSON.stringify({ type: 'finalize' }));
+        else {
+          activeSocket.send(JSON.stringify({ type: 'Finalize' }));
+          activeSocket.send(JSON.stringify({ type: 'CloseStream' }));
+        }
       }
-      deepgramSocket.close();
+      activeSocket.close();
     } catch {}
-    deepgramSocket = null;
+    activeSocket = null;
   }
+  activeProvider = null;
 
   if (keepAliveTimer) {
     clearInterval(keepAliveTimer);
@@ -295,7 +388,7 @@ async function stopAll() {
     audioContext = null;
   }
 
-  sendOverlay('LT_STATUS', { state: 'stopped', message: '停止しました' });
+  if (currentTabId) sendOverlay('LT_STATUS', { state: 'stopped', message: '停止しました' });
   currentTabId = null;
 }
 
@@ -304,13 +397,13 @@ async function startAll(message) {
   currentTabId = message.tabId;
   settings = message.settings;
 
-  if (!settings?.deepgramApiKey) throw new Error('Deepgram APIキーを設定してください。');
-
-  sendOverlay('LT_STATUS', { state: 'starting', message: '音声を取得しています…' });
-  await openDeepgramSocket();
-  running = true;
+  sendOverlay('LT_STATUS', { state: 'starting', message: '音声認識エンジンへ接続しています…' });
+  await openProvider();
   await setupAudio(message.streamId);
-  sendOverlay('LT_STATUS', { state: 'running', message: 'ライブ翻訳中' });
+  running = true;
+
+  const label = activeProvider === 'local' ? 'ローカル Qwen3-ASR' : 'Deepgram';
+  sendOverlay('LT_STATUS', { state: 'running', message: `ライブ翻訳中 · ${label}` });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -320,12 +413,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       if (message.type === 'START_CAPTURE') {
         await startAll(message);
-        sendResponse({ ok: true });
+        sendResponse({ ok: true, provider: activeProvider });
       } else if (message.type === 'STOP_CAPTURE') {
         await stopAll();
         sendResponse({ ok: true });
       } else if (message.type === 'GET_STATUS') {
-        sendResponse({ ok: true, running, tabId: currentTabId });
+        sendResponse({ ok: true, running, tabId: currentTabId, provider: activeProvider });
       } else {
         sendResponse({ ok: false, error: 'Unknown offscreen message' });
       }
