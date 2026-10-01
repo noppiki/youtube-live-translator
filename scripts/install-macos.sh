@@ -49,11 +49,11 @@ Session(model="moona3k/mlx-qwen3-asr-0.6b-4bit")
 print("Qwen3-ASR ready.")
 PY
 
-echo "▶ Preparing Gemma 3 4B smart translation model..."
+echo "▶ Preparing Gemma 4 E4B smart translation model..."
 "$VENV/bin/python" - <<'PY'
 from mlx_lm import load
-load("mlx-community/gemma-3-text-4b-it-4bit")
-print("Gemma translation model ready.")
+load("DreamFoundries/gemma-4-E4B-it-4bit")
+print("Gemma 4 E4B translation model ready.")
 PY
 
 if command -v swift >/dev/null 2>&1; then
