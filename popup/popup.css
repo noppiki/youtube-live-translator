@@ -21,9 +21,11 @@ input, select, textarea, button {
   color: CanvasText;
 }
 input, select, button { min-height: 38px; }
+input[type="range"] { min-height: 26px; padding: 0; border: 0; }
 textarea { resize: vertical; font-size: 12px; line-height: 1.4; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.localActions { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 7px; }
 .card {
   border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
   border-radius: 12px;
@@ -34,13 +36,17 @@ textarea { resize: vertical; font-size: 12px; line-height: 1.4; }
 .cardTitle { display:flex; align-items:center; justify-content:space-between; font-weight:700; font-size:13px; }
 .badge { border-radius:999px; padding:3px 8px; font-size:11px; font-weight:700; }
 .badge.online { background:#167c3a22; color:#35a85c; }
+.badge.idle { background:#9a6b1222; color:#d99a2b; }
 .badge.offline { background:#b22b2b22; color:#e05d5d; }
 .hint { font-size: 11px; line-height: 1.45; opacity: .68; margin: -5px 0 9px; }
+.rangeLabel > span { display:flex; align-items:center; justify-content:space-between; }
+.rangeLabel output { font-variant-numeric: tabular-nums; opacity:.8; }
 .buttons { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-top: 14px; }
 button { cursor: pointer; font-weight: 700; }
 button.primary { background: #ff0033; color: white; border-color: transparent; }
+button.secondary { background: color-mix(in srgb, #2f80ed 18%, Canvas); }
 button:disabled { opacity: .5; cursor: default; }
-.status { margin-top: 12px; font-size: 12px; min-height: 18px; opacity: .85; }
+.status { margin-top: 12px; font-size: 12px; min-height: 18px; opacity: .85; line-height:1.4; }
 summary { cursor:pointer; margin-top:10px; font-size:12px; font-weight:700; }
 details textarea { margin:8px 0; }
 code { font-size: 10px; }
