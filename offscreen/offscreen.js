@@ -20,6 +20,7 @@ let finalTranslationCache = new Map();
 let lockedUtteranceSpeakers = new Map();
 let liveSplitIds = new Map();
 let turnFinalizedIds = new Set();
+let rollingSpeakerChunks = new Map();
 let speakerProfiles = new Map();
 let speakerInferenceSession = null;
 let speakerInferenceBusy = false;
@@ -183,6 +184,8 @@ function splitFinalBySpeaker(data) {
     .map((group) => ({
       speaker: group.speaker,
       text: cleanTokenText(group.tokens),
+      tokens: group.tokens,
+      times: group.times,
       startMs: group.times[0],
       endMs: group.times[group.times.length - 1]
     }))
@@ -216,6 +219,73 @@ function clearLiveSplit(baseId) {
     sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: id });
   }
   liveSplitIds.delete(Number(baseId));
+}
+
+function rollingChunkKey(baseId, speaker) {
+  return `${Number(baseId)}:${Number(speaker)}`;
+}
+
+function maybeFlushRollingChunk(data, group) {
+  if (!Number.isInteger(group.speaker) || !group.tokens?.length || !group.times?.length) return;
+
+  const key = rollingChunkKey(data.utteranceId, group.speaker);
+  let state = rollingSpeakerChunks.get(key);
+  if (!state) {
+    state = {
+      committedTokens: 0,
+      lastFlushMs: group.startMs,
+      chunkIndex: 0
+    };
+    rollingSpeakerChunks.set(key, state);
+  }
+
+  const endMs = group.endMs;
+  if (!Number.isFinite(endMs) || endMs - state.lastFlushMs < 2800) return;
+
+  const pendingTokens = group.tokens.slice(state.committedTokens);
+  const pendingTimes = group.times.slice(state.committedTokens);
+  const text = cleanTokenText(pendingTokens);
+
+  // Avoid translating tiny fragments caused by timestamp jitter.
+  if (!text || pendingTokens.length < 5) return;
+
+  state.chunkIndex += 1;
+  const chunkId = Number(data.utteranceId) * 10000 + 500 + state.chunkIndex;
+  const startMs = pendingTimes[0] ?? group.startMs;
+  const chunkEndMs = pendingTimes[pendingTimes.length - 1] ?? group.endMs;
+
+  state.committedTokens = group.tokens.length;
+  state.lastFlushMs = chunkEndMs;
+  rollingSpeakerChunks.set(key, state);
+
+  lockedUtteranceSpeakers.set(chunkId, group.speaker);
+  emitUtterance({
+    utteranceId: chunkId,
+    text,
+    sourceLanguage: data.language || settings.sourceLanguage,
+    final: true,
+    startMs,
+    endMs: chunkEndMs,
+    forcedSpeaker: group.speaker
+  });
+}
+
+function remainingGroupAfterRolling(data, group) {
+  if (!Number.isInteger(group.speaker) || !group.tokens?.length) return group;
+
+  const state = rollingSpeakerChunks.get(rollingChunkKey(data.utteranceId, group.speaker));
+  if (!state?.committedTokens) return group;
+
+  const tokens = group.tokens.slice(state.committedTokens);
+  const times = group.times.slice(state.committedTokens);
+  return {
+    ...group,
+    tokens,
+    times,
+    text: cleanTokenText(tokens),
+    startMs: times[0] ?? group.endMs,
+    endMs: times[times.length - 1] ?? group.endMs
+  };
 }
 
 function emitPartialSpeakerSegments(data) {
@@ -255,6 +325,10 @@ function emitPartialSpeakerSegments(data) {
 
     if (turnFinalizedIds.has(id)) return;
 
+    if (index === groups.length - 1) {
+      maybeFlushRollingChunk(data, group);
+    }
+
     sendOverlay('LT_UTTERANCE', {
       utteranceId: id,
       original: group.text,
@@ -282,7 +356,9 @@ async function emitFinalSpeakerSegments(data) {
   sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: Number(data.utteranceId) });
 
   for (let i = 0; i < groups.length; i += 1) {
-    const group = groups[i];
+    const group = remainingGroupAfterRolling(data, groups[i]);
+    if (!group.text) continue;
+
     const segmentId = liveSegmentId(data.utteranceId, i);
     lockedUtteranceSpeakers.set(segmentId, group.speaker);
     await emitUtterance({
@@ -294,6 +370,12 @@ async function emitFinalSpeakerSegments(data) {
       endMs: group.endMs,
       forcedSpeaker: group.speaker
     });
+  }
+
+  for (const key of [...rollingSpeakerChunks.keys()]) {
+    if (key.startsWith(`${Number(data.utteranceId)}:`)) {
+      rollingSpeakerChunks.delete(key);
+    }
   }
   return true;
 }
@@ -951,6 +1033,7 @@ async function stopAll({ announce = true } = {}) {
   lockedUtteranceSpeakers = new Map();
   liveSplitIds = new Map();
   turnFinalizedIds = new Set();
+  rollingSpeakerChunks = new Map();
   speakerProfiles = new Map();
   finalizedConversation = [];
   clearTimeout(speakerInferenceTimer);
