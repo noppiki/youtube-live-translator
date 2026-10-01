@@ -94,9 +94,9 @@ cat > "$PLIST" <<EOF
     <string>$SERVER</string>
   </array>
   <key>RunAtLoad</key>
-  <false/>
+  <true/>
   <key>KeepAlive</key>
-  <false/>
+  <true/>
   <key>StandardOutPath</key>
   <string>$LOG_DIR/server.log</string>
   <key>StandardErrorPath</key>
@@ -108,6 +108,7 @@ EOF
 echo "▶ Registering local engine service..."
 launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
+launchctl kickstart -k "gui/$(id -u)/com.noppiki.youtube-live-translator" >/dev/null 2>&1 || true
 
 echo "▶ Installing Chrome Native Messaging launcher..."
 curl -fsSL "$RAW_BASE/native-host/launcher.py" -o "$NATIVE_SCRIPT"
@@ -120,22 +121,40 @@ chmod +x "$NATIVE_WRAPPER"
 
 if [[ -n "$EXTENSION_ID" ]]; then
   mkdir -p "$NATIVE_HOST_DIR"
-  cat > "$NATIVE_MANIFEST" <<EOF
-{
-  "name": "com.noppiki.youtube_live_translator",
-  "description": "Start the local AI service for YouTube Live Translator",
-  "path": "$NATIVE_WRAPPER",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://$EXTENSION_ID/"
-  ]
+  CURRENT_ID="$EXTENSION_ID" NATIVE_MANIFEST="$NATIVE_MANIFEST" NATIVE_WRAPPER="$NATIVE_WRAPPER" "$VENV/bin/python" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+manifest = Path(os.environ["NATIVE_MANIFEST"])
+wrapper = os.environ["NATIVE_WRAPPER"]
+current = f"chrome-extension://{os.environ['CURRENT_ID']}/"
+
+origins = []
+if manifest.exists():
+    try:
+        existing = json.loads(manifest.read_text())
+        origins = [x for x in existing.get("allowed_origins", []) if isinstance(x, str)]
+    except Exception:
+        pass
+
+if current not in origins:
+    origins.append(current)
+
+payload = {
+    "name": "com.noppiki.youtube_live_translator",
+    "description": "Start the local AI service for YouTube Live Translator",
+    "path": wrapper,
+    "type": "stdio",
+    "allowed_origins": origins[-8:],
 }
-EOF
+manifest.write_text(json.dumps(payload, indent=2) + "\n")
+print(f"Registered Native Messaging for {current}")
+PY
   echo "✓ One-click launcher registered for extension: $EXTENSION_ID"
 else
   echo "⚠ Extension ID was not supplied."
-  echo "  Local AI is installed, but the Chrome one-click start button will not work."
-  echo "  Re-run this installer from the command shown inside the extension popup."
+  echo "  Local AI will still auto-start, but the one-click launcher cannot be repaired for this extension ID."
 fi
 
 echo
