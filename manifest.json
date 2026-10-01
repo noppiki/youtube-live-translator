@@ -4,10 +4,16 @@
   "version": "0.2.0",
   "description": "Real-time translated subtitles for YouTube Live with local MLX Qwen3-ASR or Deepgram fallback.",
   "minimum_chrome_version": "138",
-  "permissions": ["activeTab", "storage", "tabCapture", "offscreen"],
+  "permissions": [
+    "activeTab",
+    "storage",
+    "tabCapture",
+    "offscreen"
+  ],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://api.deepgram.com/*",
+    "wss://api.deepgram.com/*",
     "http://127.0.0.1:8765/*",
     "ws://127.0.0.1:8765/*"
   ],
@@ -21,16 +27,26 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["content/content.js"],
-      "css": ["content/content.css"],
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["offscreen/pcm-worklet.js"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "offscreen/pcm-worklet.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
