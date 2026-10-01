@@ -153,6 +153,8 @@ function upsertUtterance(message) {
     node.translated.textContent = message.translated;
   }
 
+  node.root.classList.toggle('lt-translating', Boolean(message.translationPending));
+
   if (Number.isInteger(message.speaker)) {
     updateSpeaker(utteranceId, message.speaker);
   } else if (!node.speaker.textContent) {
