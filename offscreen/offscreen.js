@@ -241,9 +241,9 @@ function openLocalSocket() {
       if (!settled) {
         settled = true;
         socket.close();
-        reject(new Error('ローカルエンジン接続タイムアウト'));
+        reject(new Error('ローカルAIの準備が10分以内に完了しませんでした。モデル準備またはログを確認してください。'));
       }
-    }, 8000);
+    }, 600000);
 
     socket.onopen = () => {
       const language = QWEN_LANGUAGES[settings.sourceLanguage] || null;
@@ -267,6 +267,14 @@ function openLocalSocket() {
     socket.onmessage = (event) => {
       let data;
       try { data = JSON.parse(event.data); } catch { return; }
+
+      if (data.type === 'preparing') {
+        sendOverlay('LT_STATUS', {
+          state: 'preparing',
+          message: data.message || 'ローカルAIモデルを準備しています…'
+        });
+        return;
+      }
 
       if (data.type === 'ready') {
         clearTimeout(timeout);
@@ -292,7 +300,14 @@ function openLocalSocket() {
       } else if (data.type === 'warning') {
         sendOverlay('LT_STATUS', { state: 'warning', message: data.message || 'ローカルAI警告' });
       } else if (data.type === 'error') {
-        sendOverlay('LT_STATUS', { state: 'error', message: `ローカルSTT: ${data.message}` });
+        const message = `ローカルSTT: ${data.message || '不明なエラー'}`;
+        sendOverlay('LT_STATUS', { state: 'error', message });
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          socket.close();
+          reject(new Error(message));
+        }
       }
     };
 
@@ -361,7 +376,7 @@ async function setupAudio(streamId) {
   };
 }
 
-async function stopAll() {
+async function stopAll({ announce = true } = {}) {
   running = false;
   finalizedPieces = [];
   translateSequence += 1000;
@@ -404,7 +419,9 @@ async function stopAll() {
     audioContext = null;
   }
 
-  if (currentTabId) sendOverlay('LT_STATUS', { state: 'stopped', message: '停止しました' });
+  if (announce && currentTabId) {
+    sendOverlay('LT_STATUS', { state: 'stopped', message: '停止しました' });
+  }
   currentTabId = null;
 }
 
@@ -443,8 +460,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: 'Unknown offscreen message' });
       }
     } catch (error) {
-      await stopAll().catch(() => {});
-      sendResponse({ ok: false, error: error?.message || String(error) });
+      const message = error?.message || String(error);
+      sendOverlay('LT_STATUS', { state: 'error', message });
+      await stopAll({ announce: false }).catch(() => {});
+      sendResponse({ ok: false, error: message });
     }
   })();
 
