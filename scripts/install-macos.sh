@@ -37,7 +37,7 @@ fi
 
 echo "▶ Creating/updating isolated Python environment..."
 uv venv --python 3.12 "$VENV"
-uv pip install --python "$VENV/bin/python" "mlx-qwen3-asr>=0.4.3" "aiohttp>=3.10" "numpy>=2.0"
+uv pip install --python "$VENV/bin/python" "mlx-qwen3-asr>=0.4.3" "mlx-lm>=0.28" "aiohttp>=3.10" "numpy>=2.0"
 
 echo "▶ Installing local routing server..."
 curl -fsSL "$RAW_BASE/local-server/server.py" -o "$SERVER"
@@ -47,6 +47,13 @@ echo "▶ Preparing Qwen3-ASR 0.6B..."
 from mlx_qwen3_asr import Session
 Session(model="moona3k/mlx-qwen3-asr-0.6b-4bit")
 print("Qwen3-ASR ready.")
+PY
+
+echo "▶ Preparing Gemma 3 4B smart translation model..."
+"$VENV/bin/python" - <<'PY'
+from mlx_lm import load
+load("mlx-community/gemma-3-text-4b-it-4bit")
+print("Gemma translation model ready.")
 PY
 
 if command -v swift >/dev/null 2>&1; then
