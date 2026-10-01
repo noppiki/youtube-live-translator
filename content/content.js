@@ -133,9 +133,9 @@ function paintSpeaker(node) {
   node.speaker.classList.toggle('lt-speaker-pending', !Number.isInteger(node.speakerIndex));
 }
 
-function clearLaneText(node) {
+function clearLaneText(node, { keepTranslation = false } = {}) {
   node.original.textContent = '';
-  node.translated.textContent = '';
+  if (!keepTranslation) node.translated.textContent = '';
   node.root.classList.remove('lt-translating', 'lt-final');
   node.root.classList.add('lt-partial');
 }
@@ -171,7 +171,7 @@ function laneFor(utteranceId, speakerIndex) {
     }
 
     if (lane.utteranceId !== utteranceId) {
-      clearLaneText(lane);
+      clearLaneText(lane, { keepTranslation: true });
       bindUtterance(lane, utteranceId);
     }
     return lane;
