@@ -9,12 +9,18 @@ from pathlib import Path
 import numpy as np
 from aiohttp import web
 from mlx_qwen3_asr import Session
+from mlx_lm import load as mlx_load, stream_generate
+from mlx_lm.sample_utils import make_sampler
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("YTLT_PORT", "8765"))
 APP_DIR = Path.home() / "Library/Application Support/YouTubeLiveTranslator"
 FLUID_BRIDGE = Path(os.environ.get("YTLT_FLUID_BRIDGE", APP_DIR / "bin/fluid-bridge"))
 DEFAULT_MODEL = os.environ.get("YTLT_MODEL", "moona3k/mlx-qwen3-asr-0.6b-4bit")
+TRANSLATION_MODEL = os.environ.get(
+    "YTLT_TRANSLATION_MODEL",
+    "mlx-community/gemma-3-text-4b-it-4bit",
+)
 
 MODELS = {
     "balanced": {
@@ -28,6 +34,17 @@ MODELS = {
 }
 _sessions = {}
 _session_lock = asyncio.Lock()
+_translation_model = None
+_translation_tokenizer = None
+_translation_lock = asyncio.Lock()
+
+TRANSLATION_SYSTEM = """You translate English live-stream captions into concise, natural Japanese subtitles.
+Use recent dialogue only as context. Translate CURRENT only.
+Preserve person names, product names, model names, acronyms, and technical terms exactly when they appear in Latin script unless the glossary explicitly specifies a Japanese form.
+Follow the glossary exactly.
+Do not explain or add notes. Output Japanese translation only.
+Prefer natural spoken Japanese over literal wording.
+Keep the subtitle concise without dropping meaning or negation."""
 
 
 def _allowed_origin(request: web.Request) -> bool:
@@ -50,6 +67,87 @@ async def get_session(model_id: str) -> Session:
             _sessions[model_id] = session
         return session
 
+
+
+async def get_translation_model():
+    global _translation_model, _translation_tokenizer
+    async with _translation_lock:
+        if _translation_model is None or _translation_tokenizer is None:
+            _translation_model, _translation_tokenizer = await asyncio.to_thread(
+                mlx_load, TRANSLATION_MODEL
+            )
+        return _translation_model, _translation_tokenizer
+
+
+def _translate_sync(model, tokenizer, text: str, context, glossary) -> str:
+    recent = "\n".join(str(x) for x in (context or [])[-3:]) or "(none)"
+    glossary_text = "\n".join(f"- {x}" for x in (glossary or [])) or "(none)"
+    user = f"""RECENT CONTEXT:
+{recent}
+
+GLOSSARY:
+{glossary_text}
+
+CURRENT:
+{text}"""
+    prompt = tokenizer.apply_chat_template(
+        [
+            {"role": "system", "content": TRANSLATION_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+
+    chunks = []
+    for response in stream_generate(
+        model,
+        tokenizer,
+        prompt=prompt,
+        max_tokens=96,
+        sampler=make_sampler(temp=0.0),
+    ):
+        piece = getattr(response, "text", "")
+        if piece:
+            chunks.append(piece)
+
+    result = "".join(chunks).strip()
+    for prefix in ("A:", "B:", "C:", "D:"):
+        if result.startswith(prefix):
+            result = result[len(prefix):].strip()
+            break
+    return result
+
+
+async def translate(request: web.Request):
+    if not _allowed_origin(request):
+        raise web.HTTPForbidden()
+
+    data = await request.json()
+    text = str(data.get("text") or "").strip()
+    source = str(data.get("sourceLanguage") or "en").lower()
+    target = str(data.get("targetLanguage") or "ja").lower()
+
+    if not text:
+        return web.json_response({"ok": True, "translated": ""})
+    if source not in {"en", "english", "en-us", "en-gb"} or target != "ja":
+        raise web.HTTPBadRequest(text="Local smart translation currently supports English → Japanese only.")
+
+    model, tokenizer = await get_translation_model()
+    translated = await asyncio.to_thread(
+        _translate_sync,
+        model,
+        tokenizer,
+        text,
+        data.get("context") or [],
+        data.get("glossary") or [],
+    )
+    return web.json_response({
+        "ok": True,
+        "translated": translated,
+        "model": TRANSLATION_MODEL,
+    })
 
 class FluidProcess:
     def __init__(self, diarization: bool):
@@ -160,6 +258,11 @@ async def health(request: web.Request):
             "defaultModel": DEFAULT_MODEL,
             "loadedModels": list(_sessions.keys()),
             "models": MODELS,
+            "translation": {
+                "model": TRANSLATION_MODEL,
+                "loaded": _translation_model is not None,
+                "englishToJapanese": True,
+            },
             "fluidAudio": {
                 "available": FLUID_BRIDGE.exists(),
                 "path": str(FLUID_BRIDGE),
@@ -416,6 +519,7 @@ app = web.Application()
 app.router.add_get("/health", health)
 app.router.add_get("/models", models)
 app.router.add_post("/models/install", install_model)
+app.router.add_post("/translate", translate)
 app.router.add_get("/stream", stream)
 
 if __name__ == "__main__":
