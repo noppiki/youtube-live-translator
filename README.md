@@ -2,132 +2,252 @@
 
 YouTube Live のタブ音声をリアルタイム文字起こしし、Chrome の組み込み Translator API で翻訳字幕を動画上へ表示する Manifest V3 拡張です。
 
-## v0.3
+## v0.4: FluidAudio + Qwen3 ハイブリッド
 
-- 翻訳字幕サイズを **70〜180%** で変更可能
-- 設定変更を開いているYouTubeへ即時反映
-- Qwen3-ASRがインストール済み・停止中なら **「ローカル起動」** からワンクリック起動
-- Chrome Native Messagingの小さな起動ヘルパーを追加
-- ローカルQwen3サービスを常駐必須から **オンデマンド起動** に変更
+ローカル音声認識を用途ごとに切り替えます。
 
-## 音声認識
+- **英語ライブ**: FluidAudio / Parakeet EOU 120M (320 ms)
+- **英語 + 話者分離**: FluidAudio / Parakeet EOU + Sortformer
+- **日本語・中国語・その他多言語**: Qwen3-ASR MLX
+- **クラウド保険**: Deepgram Nova-3
+- **翻訳**: Chrome Translator API
 
-デフォルトは **ローカル優先** です。
-
-1. Apple Silicon Mac 上の Qwen3-ASR MLX を探す
-2. 接続できればローカルSTTを使用（API料金なし）
-3. 接続できず Deepgram APIキーが設定されていれば Nova-3 へ自動フォールバック
-4. 翻訳は Chrome Translator API を使用
-
-### 推奨モデル
-
-- バランス: `moona3k/mlx-qwen3-asr-0.6b-4bit`（約517MB）
-- 高精度: `moona3k/mlx-qwen3-asr-1.7b-4bit`（約1.2GB）
-
-## 構成
-
-- 音声取得: `chrome.tabCapture`
-- 長時間音声処理: `chrome.offscreen`
-- ローカルSTT: Qwen3-ASR / MLX
-- クラウドSTT: Deepgram Nova-3（任意・フォールバック）
-- 翻訳: Chrome Translator API
-- 字幕描画: YouTubeページ上のcontent script
-- 音声: PCM16 / mono / 16kHz
-- ローカルSTT: `ws://127.0.0.1:8765/stream`
-- ローカル起動: Chrome Native Messaging → macOS LaunchAgent
-
-## Chrome拡張の導入
-
-1. このリポジトリをcloneまたはZIPで取得
-2. Chromeで `chrome://extensions` を開く
-3. 「デベロッパー モード」をON
-4. 「パッケージ化されていない拡張機能を読み込む」
-5. このリポジトリのフォルダを選択
-
-manifestを更新した場合は、`chrome://extensions` で拡張を再読み込みしてください。
-
-## ローカルエンジンの導入（Apple Silicon Mac）
-
-### 推奨
-
-拡張を開き、
-
-**ローカルエンジン → 初回インストール / 起動ヘルパー更新**
-
-に表示されるコマンドをコピーしてターミナルへ貼り付けます。
-
-そのコマンドには現在のChrome拡張IDが自動で含まれます。Native Messagingの `allowed_origins` はワイルドカードを使えないため、ワンクリック起動にはこのID登録が必要です。
-
-既にQwen3-ASRを導入済みの場合でも、v0.3の「ローカル起動」ボタンを使うには最新版インストーラを一度だけ再実行してください。
-
-### ローカルSTTだけを導入する場合
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash
-```
-
-この形式では拡張IDが渡らないため、STT本体は入りますが「ローカル起動」ボタン用Native Messagingホストは登録されません。
-
-### インストーラが行うこと
-
-- `uv` の確認/導入
-- Python 3.12隔離環境
-- `mlx-qwen3-asr` / aiohttp / numpy
-- 推奨0.6Bモデル
-- `127.0.0.1:8765` のローカルサーバー
-- macOS LaunchAgent
-- Chrome Native Messaging起動ヘルパー
-
-ファイルは主に以下へ置きます。
+デフォルトのローカルバックエンドは **自動** です。
 
 ```
-~/Library/Application Support/YouTubeLiveTranslator/
+英語
+ └─ FluidAudio
+     ├─ Parakeet EOU 320ms
+     └─ Sortformer（話者分離ON時）
+
+英語以外
+ └─ Qwen3-ASR 0.6B 4-bit
+
+ローカルサービス利用不可
+ └─ Deepgram（APIキー設定時）
 ```
 
-Native Messaging manifest:
+## v0.4 の追加機能
+
+- FluidAudio / CoreML バックエンド
+- Parakeet EOU 120M の低遅延英語STT
+- Sortformer によるストリーミング話者分離
+- 字幕へ **話者 A / B / C...** を表示
+- ローカルバックエンドを設定から切替
+  - 自動
+  - FluidAudio
+  - Qwen3-ASR
+- 話者分離 ON / OFF
+- FluidAudioモデルを設定画面から準備
+- Qwen3環境をそのまま維持
+- Deepgramフォールバックも維持
+- 翻訳字幕サイズ 70〜180%
+- ローカルAIのワンクリック起動
+
+## 話者分離について
+
+話者分離は FluidAudio の Sortformer を使います。
+
+リアルタイム話者分離は文字起こしより少し遅れて判定されるため、本拡張では字幕そのものを待たせません。
 
 ```
-~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.noppiki.youtube_live_translator.json
+音声
+ ↓
+Parakeet → すぐ字幕
+ ↓
+Sortformer → 少し遅れて話者判定
+ ↓
+現在の字幕ラベルを「話者 A / B...」へ更新
 ```
 
-システムPythonは変更しません。
+そのため低遅延を維持しつつ話者を追跡できます。
 
-### ローカル起動
-
-拡張の状態表示は以下です。
-
-- **接続済み**: Qwen3サービス稼働中
-- **停止中**: インストール済み。**ローカル起動**で開始可能
-- **ヘルパー未設定**: v0.3インストーラを再実行
-- **未インストール**: ローカルエンジンを導入
-
-サービスはv0.3から常時KeepAliveではなく、必要時に起動する構成です。
-
-### アンインストール
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/uninstall-macos.sh | bash
-```
-
-## 翻訳字幕サイズ
-
-ポップアップの **翻訳字幕サイズ** で70〜180%を10%刻みで変更できます。
-
-- デフォルト: 100%
-- 設定は `chrome.storage.local` に保存
-- YouTubeを再読み込みしても維持
-- スライダー操作中に現在のYouTubeタブへ即時反映
+現在、話者分離は **英語 + FluidAudio** の場合に有効です。
 
 ## ローカルモデル
 
-設定画面から次のモデルを選び、「モデル準備」を押すとダウンロード/ロードできます。
+### FluidAudio
 
-- Qwen3-ASR 0.6B 4-bit
-- Qwen3-ASR 1.7B 4-bit
+標準:
 
-## 固有名詞・専門用語
+- Parakeet EOU 120M
+- chunk: 320 ms
+- Apple Neural Engine / CoreML
+- 英語向け
 
-改行区切りで入力した語句をQwen3-ASRの `context` に渡します。
+話者分離:
+
+- Sortformer
+- CoreML
+- ストリーミング推定
+
+FluidAudioのモデルは必要になった時点で設定画面の **モデル準備** からダウンロードします。
+
+### Qwen3-ASR
+
+- バランス: `moona3k/mlx-qwen3-asr-0.6b-4bit`
+- 高精度: `moona3k/mlx-qwen3-asr-1.7b-4bit`
+
+Qwen3-ASRは日本語・中国語を含む多言語と、専門用語 `context` 用として残しています。
+
+## 構成
+
+```
+Chrome Extension
+  │
+  ├─ tabCapture
+  │
+  ├─ Chrome Translator API
+  │
+  └─ WebSocket
+       ↓
+127.0.0.1:8765
+       │
+       ├─ FluidAudio Swift bridge
+       │    ├─ Parakeet EOU
+       │    └─ Sortformer
+       │
+       └─ Qwen3-ASR MLX
+```
+
+### 主な技術
+
+- Chrome Manifest V3
+- `chrome.tabCapture`
+- `chrome.offscreen`
+- Native Messaging
+- Python / aiohttp routing server
+- MLX / Qwen3-ASR
+- Swift / FluidAudio
+- CoreML / Apple Neural Engine
+- Chrome Translator API
+
+## Chrome拡張の導入
+
+```bash
+git clone https://github.com/noppiki/youtube-live-translator.git
+cd youtube-live-translator
+```
+
+Chromeで:
+
+1. `chrome://extensions`
+2. デベロッパーモード ON
+3. 「パッケージ化されていない拡張機能を読み込む」
+4. このリポジトリのフォルダを選択
+
+manifestを更新した場合は拡張を再読み込みしてください。
+
+## Apple Silicon Mac のローカルAI導入
+
+### 推奨
+
+拡張を一度Chromeへ読み込んでから、ポップアップの
+
+**初回インストール / ローカルAI更新**
+
+に表示されるコマンドをコピーして実行してください。
+
+コマンドには現在のChrome拡張IDが自動で含まれます。
+
+形式:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash -s -- YOUR_EXTENSION_ID
+```
+
+### インストーラが行うこと
+
+- `uv`
+- Python 3.12隔離環境
+- Qwen3-ASR / MLX
+- Qwen3-ASR 0.6Bモデル
+- aiohttpローカルルーター
+- FluidAudio Swift bridgeのビルド
+- macOS LaunchAgent
+- Chrome Native Messaging起動ヘルパー
+
+主な配置先:
+
+```
+~/Library/Application Support/YouTubeLiveTranslator/
+├── .venv/
+├── server.py
+├── bin/
+│   └── fluid-bridge
+├── fluid-bridge-src/
+├── native/
+└── logs/
+```
+
+FluidAudioモデルはFluidAudio標準のモデルキャッシュへ保存されます。
+
+## v0.3以前から更新する場合
+
+```bash
+cd ~/dev/youtube-live-translator
+git pull
+```
+
+1. `chrome://extensions` で拡張を再読み込み
+2. 拡張を開く
+3. **初回インストール / ローカルAI更新** のコマンドを再実行
+4. **ローカルAI起動**
+5. **接続テスト**
+6. 英語ライブなら FluidAudio を選択
+7. 初回だけ **モデル準備**
+
+既存のQwen3-ASR環境はそのまま利用できます。
+
+## 設定
+
+### 音声認識
+
+- **自動**: ローカルAI → Deepgram
+- **ローカルのみ**
+- **Deepgramのみ**
+
+### ローカルバックエンド
+
+- **自動**
+  - 英語 → FluidAudio
+  - その他 → Qwen3
+- **FluidAudio**
+  - 英語専用
+  - 話者分離対応
+- **Qwen3-ASR**
+  - 多言語
+  - context対応
+
+### 話者分離
+
+```
+☐ 話者分離（FluidAudio Sortformer）
+```
+
+有効時は字幕に以下のように表示します。
+
+```
+[話者 A]
+This is the new model.
+これは新しいモデルです。
+
+[話者 B]
+When will it ship?
+いつリリースされますか？
+```
+
+話者IDは配信中の推定IDで、実名識別ではありません。
+
+### 翻訳字幕サイズ
+
+70〜180%を10%刻みで変更できます。
+
+設定は `chrome.storage.local` に保存し、開いているYouTubeへ即時反映します。
+
+### 固有名詞・専門用語
+
+Qwen3-ASR使用時は入力内容を `context` に渡します。
 
 例:
 
@@ -144,43 +264,79 @@ NVIDIA
 
 ## ローカルAPI
 
-### ヘルスチェック
+### Health
 
 ```bash
 curl http://127.0.0.1:8765/health
 ```
 
-### モデル一覧
+FluidAudio bridgeが利用可能かも返します。
+
+### Models
 
 ```bash
 curl http://127.0.0.1:8765/models
 ```
 
-### Streaming WebSocket
+### Streaming
 
 ```
 ws://127.0.0.1:8765/stream
 ```
 
+入力:
+
+- PCM16
+- mono
+- 16 kHz
+
+## アンインストール
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/uninstall-macos.sh | bash
+```
+
 ## セキュリティ
 
-ローカルSTTサーバーは `127.0.0.1` のみにbindします。
+- ローカルサーバーは `127.0.0.1` のみにbind
+- Native Messaging hostはインストール時に渡されたChrome拡張IDだけを許可
+- Native Messaging helperが行う操作はローカルAI LaunchAgentの状態確認・起動のみ
+- Deepgram APIキーは `chrome.storage.local` 保存
+- 共有APIキーを拡張へ埋め込まない
 
-ワンクリック起動にはChromeのNative Messagingを使います。Native Messagingホストはインストール時に渡された**現在の拡張IDだけ**を `allowed_origins` に登録します。ChromeではNative Messagingホストの許可originにワイルドカードを利用できません。
+## 制限
 
-Native Messagingホスト自身が行える操作は、このプロジェクトのmacOS LaunchAgentの状態確認と起動だけです。
-
-Deepgram APIキーは `chrome.storage.local` へ保存します。共有APIキーを拡張へ埋め込まないでください。
+- FluidAudioの低遅延バックエンドは現在英語向け
+- 話者分離はリアルタイム推定なので誤判定することがある
+- 話者判定は字幕より後追いになる
+- Qwen3経路では現在話者分離なし
+- 初回FluidAudioモデル準備にはモデルダウンロードが必要
+- 現在のローカルインストーラはApple Silicon Mac向け
 
 ## 今後
 
 - YouTube公式ライブ字幕が存在する場合はSTTを省略
-- 字幕の文脈バッファ/自然化
-- 原文字幕ON/OFF、位置、背景透明度
-- ローカルサービス停止ボタン
+- 話者名の手動割当
+- 話者ごとの字幕履歴
+- 話者ラベル表示ON/OFF
+- 原文字幕ON/OFF
+- 字幕位置・背景透明度
+- SRT / VTT出力
 - Twitch / X Live対応
-- SRT / VTTログ保存
 - Windows向けローカルエンジン
+
+## Third-party components
+
+This project can use:
+
+- FluidAudio
+- Parakeet EOU
+- Sortformer
+- Qwen3-ASR
+- Deepgram
+- Chrome Translator API
+
+Please review the upstream model/library licenses before redistribution.
 
 ## License
 
