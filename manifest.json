@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Live Translator for YouTube",
-  "version": "0.5.3",
-  "description": "Real-time translated YouTube Live subtitles with FluidAudio diarization, Gemma 4 E4B smart translation, Qwen3-ASR, and Deepgram fallback.",
+  "version": "0.5.4",
+  "description": "Real-time YouTube Live subtitles and visible comment/chat translation with FluidAudio, Gemma 4 E4B, Qwen3-ASR, and Deepgram fallback.",
   "minimum_chrome_version": "138",
   "permissions": [
     "activeTab",
@@ -38,6 +38,19 @@
         "content/content.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content/comment-translator.js"
+      ],
+      "css": [
+        "content/comment-translator.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
