@@ -18,7 +18,7 @@ MODELS = {
         "kind": "context_llm",
     },
     "gemma4e4b": {
-        "id": "Siarhei/gemma-4-E4B-4bit",
+        "id": "DreamFoundries/gemma-4-E4B-it-4bit",
         "kind": "context_llm",
     },
     "gemma4-12b": {
