@@ -16,6 +16,11 @@ let nextGenericUtteranceId = 1;
 let speakerTimeline = [];
 let recentUtterances = new Map();
 let utteranceTranslationSeq = new Map();
+let speakerProfiles = new Map();
+let speakerInferenceSession = null;
+let speakerInferenceBusy = false;
+let speakerInferenceTimer = null;
+let finalizedConversation = [];
 
 const LANGUAGE_CODES = {
   English: 'en', Japanese: 'ja', Korean: 'ko', Chinese: 'zh',
@@ -152,7 +157,9 @@ async function emitUtterance({
   if (Number.isFinite(startMs) || Number.isFinite(endMs)) {
     recentUtterances.set(id, {
       startMs: Number.isFinite(startMs) ? startMs : null,
-      endMs: Number.isFinite(endMs) ? endMs : null
+      endMs: Number.isFinite(endMs) ? endMs : null,
+      text: displayText,
+      final: Boolean(final)
     });
     if (recentUtterances.size > 12) {
       const oldest = [...recentUtterances.keys()].sort((a, b) => a - b)[0];
@@ -177,16 +184,27 @@ async function emitUtterance({
   try {
     const translated = await translateText(displayText, sourceLanguage);
     if (!running || utteranceTranslationSeq.get(id) !== sequence) return;
+    const resolvedSpeaker = speakerForUtterance(id);
     sendOverlay('LT_UTTERANCE', {
       utteranceId: id,
       original: displayText,
       translated,
       final,
-      speaker: speakerForUtterance(id),
+      speaker: resolvedSpeaker,
       sourceLanguage: normalizeSourceLanguage(sourceLanguage),
       startMs,
       endMs
     });
+
+    if (final) {
+      rememberFinalUtterance({
+        utteranceId: id,
+        text: displayText,
+        speaker: resolvedSpeaker,
+        startMs,
+        endMs
+      });
+    }
   } catch (error) {
     sendOverlay('LT_STATUS', { state: 'error', message: error?.message || String(error) });
   }
@@ -227,7 +245,173 @@ function addSpeakerPoint(speaker, changeAtMs) {
         utteranceId,
         speaker: resolved
       });
+
+      const stored = recentUtterances.get(utteranceId);
+      if (stored?.final && stored.text) {
+        rememberFinalUtterance({
+          utteranceId,
+          text: stored.text,
+          speaker: resolved,
+          startMs: stored.startMs,
+          endMs: stored.endMs
+        });
+      }
     }
+  }
+}
+
+function profileLabelForOverlay(speaker, profile) {
+  sendOverlay('LT_SPEAKER_PROFILE', {
+    speaker,
+    name: profile?.name || '',
+    role: profile?.role || '',
+    confidence: Number(profile?.confidence || 0),
+    source: profile?.source || ''
+  });
+}
+
+function rememberFinalUtterance({ utteranceId, text, speaker, startMs, endMs }) {
+  if (!text?.trim()) return;
+  const idx = finalizedConversation.findIndex((u) => u.utteranceId === utteranceId);
+  const item = {
+    utteranceId,
+    text: text.trim(),
+    speaker: Number.isInteger(speaker) ? speaker : null,
+    startMs: Number.isFinite(startMs) ? startMs : null,
+    endMs: Number.isFinite(endMs) ? endMs : null
+  };
+  if (idx >= 0) finalizedConversation[idx] = item;
+  else finalizedConversation.push(item);
+
+  finalizedConversation = finalizedConversation.slice(-18);
+  scheduleSpeakerInference();
+}
+
+function inferExplicitNames() {
+  const bySpeaker = new Map();
+
+  for (const item of finalizedConversation) {
+    if (!Number.isInteger(item.speaker)) continue;
+    const text = item.text;
+
+    const selfIntro = text.match(/\b(?:i(?:'m| am)|my name is)\s+([A-Z][A-Za-z.'-]{1,30}(?:\s+[A-Z][A-Za-z.'-]{1,30})?)/i);
+    if (selfIntro) {
+      bySpeaker.set(item.speaker, {
+        name: selfIntro[1].trim(),
+        role: '',
+        confidence: 0.96,
+        source: 'self-introduction'
+      });
+    }
+  }
+
+  for (const [speaker, profile] of bySpeaker) {
+    const previous = speakerProfiles.get(speaker);
+    if (!previous || profile.confidence > Number(previous.confidence || 0)) {
+      speakerProfiles.set(speaker, profile);
+      profileLabelForOverlay(speaker, profile);
+    }
+  }
+}
+
+function scheduleSpeakerInference() {
+  if (!settings?.speakerNameInference) return;
+  inferExplicitNames();
+  clearTimeout(speakerInferenceTimer);
+  speakerInferenceTimer = setTimeout(() => runSpeakerInference().catch(() => {}), 1200);
+}
+
+async function getSpeakerInferenceSession() {
+  if (speakerInferenceSession) return speakerInferenceSession;
+  if (!('LanguageModel' in self)) return null;
+
+  const options = {
+    expectedInputs: [{ type: 'text', languages: ['en', 'ja'] }],
+    expectedOutputs: [{ type: 'text', languages: ['en'] }]
+  };
+  const availability = await LanguageModel.availability(options);
+  if (availability !== 'available') return null;
+
+  speakerInferenceSession = await LanguageModel.create(options);
+  return speakerInferenceSession;
+}
+
+async function runSpeakerInference() {
+  if (speakerInferenceBusy || !settings?.speakerNameInference) return;
+  const speakers = [...new Set(finalizedConversation.map((u) => u.speaker).filter(Number.isInteger))];
+  if (!speakers.length || finalizedConversation.length < 2) return;
+
+  const session = await getSpeakerInferenceSession();
+  if (!session) return;
+
+  speakerInferenceBusy = true;
+  try {
+    const page = settings.pageContext || {};
+    const transcript = finalizedConversation.map((u) => {
+      const label = Number.isInteger(u.speaker) ? `SPEAKER_${u.speaker}` : 'UNKNOWN';
+      return `${label}: ${u.text}`;
+    }).join('\n');
+
+    const schema = {
+      type: 'object',
+      properties: {
+        speakers: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              speaker: { type: 'integer' },
+              name: { type: 'string' },
+              role: { type: 'string' },
+              confidence: { type: 'number', minimum: 0, maximum: 1 }
+            },
+            required: ['speaker', 'name', 'role', 'confidence'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['speakers'],
+      additionalProperties: false
+    };
+
+    const prompt = `Infer speaker names and roles from a live-stream transcript.
+Rules:
+- Never identify a person from voice characteristics.
+- Use only the supplied text and page metadata.
+- A name should be non-empty only when supported by explicit or strong textual evidence.
+- If uncertain about a name, return an empty name and infer a role such as Host, Guest, Interviewer, Presenter, Commentator.
+- Confidence is about the proposed name/role mapping, from 0 to 1.
+- Speaker numbers must match the supplied SPEAKER_N IDs.
+
+Page title: ${page.title || ''}
+Channel: ${page.channel || ''}
+Description: ${page.description || ''}
+
+Transcript:
+${transcript}`;
+
+    const raw = await session.prompt(prompt, { responseConstraint: schema });
+    const result = JSON.parse(raw);
+
+    for (const candidate of result.speakers || []) {
+      if (!Number.isInteger(candidate.speaker) || !speakers.includes(candidate.speaker)) continue;
+
+      const profile = {
+        name: String(candidate.name || '').trim().slice(0, 80),
+        role: String(candidate.role || '').trim().slice(0, 60),
+        confidence: Math.max(0, Math.min(1, Number(candidate.confidence || 0))),
+        source: 'chrome-prompt-api'
+      };
+
+      const previous = speakerProfiles.get(candidate.speaker);
+      if (!previous || profile.confidence >= Number(previous.confidence || 0) + 0.05 ||
+          (!previous.name && profile.name && profile.confidence >= 0.7)) {
+        speakerProfiles.set(candidate.speaker, profile);
+        profileLabelForOverlay(candidate.speaker, profile);
+      }
+    }
+  } finally {
+    speakerInferenceBusy = false;
   }
 }
 
@@ -498,6 +682,15 @@ async function stopAll({ announce = true } = {}) {
   speakerTimeline = [];
   recentUtterances = new Map();
   utteranceTranslationSeq = new Map();
+  speakerProfiles = new Map();
+  finalizedConversation = [];
+  clearTimeout(speakerInferenceTimer);
+  speakerInferenceTimer = null;
+  speakerInferenceBusy = false;
+  if (speakerInferenceSession) {
+    try { speakerInferenceSession.destroy?.(); } catch {}
+    speakerInferenceSession = null;
+  }
 
   if (keepAliveTimer) {
     clearInterval(keepAliveTimer);
