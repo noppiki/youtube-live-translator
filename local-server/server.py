@@ -39,13 +39,15 @@ _translation_tokenizer = None
 _translation_lock = asyncio.Lock()
 _translation_inference_lock = asyncio.Lock()
 
-TRANSLATION_SYSTEM = """You translate English live-stream captions into concise, natural Japanese subtitles.
+TRANSLATION_SYSTEM = """You translate live-stream captions into concise, natural Japanese subtitles.
 Use recent dialogue only as context. Translate CURRENT only.
-Preserve person names, product names, model names, acronyms, and technical terms exactly when they appear in Latin script unless the glossary explicitly specifies a Japanese form.
+Output Japanese only. Do not leave Korean, Chinese, Spanish, French, German, or other source-language words in the output unless they are proper names, product names, model names, acronyms, or glossary-preserved terms.
+Preserve person names, product names, model names, acronyms, and technical terms in Latin script unless the glossary explicitly specifies a Japanese form.
 Follow the glossary exactly.
-Do not explain or add notes. Output Japanese translation only.
+Do not explain or add notes.
 Prefer natural spoken Japanese over literal wording.
-Keep the subtitle concise without dropping meaning, negation, numbers, or units."""
+Never drop meaning, negation, numbers, measurement units, or currency units.
+If a number has a unit in the source, keep the unit in Japanese in the translation."""
 
 
 def _allowed_origin(request: web.Request) -> bool:
@@ -80,10 +82,13 @@ async def get_translation_model():
         return _translation_model, _translation_tokenizer
 
 
-def _translate_sync(model, tokenizer, text: str, context, glossary) -> str:
+def _translate_sync(model, tokenizer, text: str, context, glossary, source: str, target: str) -> str:
     recent = "\n".join(str(x) for x in (context or [])[-3:]) or "(none)"
     glossary_text = "\n".join(f"- {x}" for x in (glossary or [])) or "(none)"
-    user = f"""RECENT CONTEXT:
+    user = f"""SOURCE LANGUAGE: {source}
+TARGET LANGUAGE: {target}
+
+RECENT CONTEXT:
 {recent}
 
 GLOSSARY:
@@ -140,8 +145,9 @@ async def translate(request: web.Request):
 
     if not text:
         return web.json_response({"ok": True, "translated": ""})
-    if source not in {"en", "english", "en-us", "en-gb"} or target != "ja":
-        raise web.HTTPBadRequest(text="Local smart translation currently supports English → Japanese only.")
+    supported_sources = {"en", "english", "en-us", "en-gb", "ko", "kr", "zh", "zh-cn", "zh-tw", "es", "fr", "de"}
+    if source not in supported_sources or target != "ja":
+        raise web.HTTPBadRequest(text="Local smart translation supports English/Korean/Chinese/Spanish/French/German → Japanese.")
 
     model, tokenizer = await get_translation_model()
     async with _translation_inference_lock:
@@ -152,6 +158,8 @@ async def translate(request: web.Request):
             text,
             data.get("context") or [],
             data.get("glossary") or [],
+            source,
+            target,
         )
     return web.json_response({
         "ok": True,
@@ -271,7 +279,7 @@ async def health(request: web.Request):
             "translation": {
                 "model": TRANSLATION_MODEL,
                 "loaded": _translation_model is not None,
-                "englishToJapanese": True,
+                "toJapanese": ["en", "ko", "zh", "es", "fr", "de"],
             },
             "fluidAudio": {
                 "available": FLUID_BRIDGE.exists(),
