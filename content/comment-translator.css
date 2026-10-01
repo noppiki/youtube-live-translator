@@ -1,0 +1,12 @@
+.lt-comment-translation {
+  margin-top: 4px;
+  color: var(--yt-spec-text-secondary, #aaa);
+  font-size: 0.95em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.lt-comment-translating {
+  opacity: 0.55;
+  font-style: italic;
+}
