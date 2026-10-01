@@ -4,9 +4,7 @@ let statusEl;
 let hideTimer;
 
 const utteranceNodes = new Map();
-const speakerLanes = new Map();
 const speakerProfiles = new Map();
-let pendingLane = null;
 
 function clampSize(value) {
   const n = Number(value);
@@ -96,9 +94,10 @@ function scheduleHide(ms = 7000) {
   }, ms);
 }
 
-function createLane(speakerIndex = null) {
+function createUtteranceNode(utteranceId) {
   const root = document.createElement('div');
   root.className = 'lt-utterance';
+  root.dataset.utteranceId = String(utteranceId);
 
   const speaker = document.createElement('div');
   speaker.className = 'lt-utterance-speaker';
@@ -121,11 +120,13 @@ function createLane(speakerIndex = null) {
     speaker,
     original,
     translated,
-    speakerIndex: Number.isInteger(speakerIndex) ? speakerIndex : null,
-    utteranceId: null,
-    final: false
+    speakerIndex: null,
+    final: false,
+    order: performance.now()
   };
+  utteranceNodes.set(utteranceId, node);
   paintSpeaker(node);
+  trimUtterances();
   return node;
 }
 
@@ -135,82 +136,30 @@ function paintSpeaker(node) {
   node.speaker.classList.toggle('lt-speaker-pending', !Number.isInteger(node.speakerIndex));
 }
 
-function clearLaneText(node, { keepTranslation = false } = {}) {
-  node.original.textContent = '';
-  if (!keepTranslation) node.translated.textContent = '';
-  node.root.classList.remove('lt-translating', 'lt-final');
-  node.root.classList.add('lt-partial');
+function moveToLatest(node) {
+  if (node.root.parentElement === utteranceList) {
+    utteranceList.appendChild(node.root);
+  }
+  node.order = performance.now();
 }
 
-function bindUtterance(node, utteranceId) {
-  if (Number.isInteger(node.utteranceId)) {
-    utteranceNodes.delete(node.utteranceId);
+function trimUtterances() {
+  const nodes = [...utteranceNodes.entries()]
+    .sort((a, b) => a[1].order - b[1].order);
+
+  while (nodes.length > 3) {
+    const [id, node] = nodes.shift();
+    node.root.remove();
+    utteranceNodes.delete(id);
   }
-  node.utteranceId = utteranceId;
-  node.root.dataset.utteranceId = String(utteranceId);
-  utteranceNodes.set(utteranceId, node);
-}
-
-function laneFor(utteranceId, speakerIndex) {
-  if (Number.isInteger(speakerIndex)) {
-    let lane = speakerLanes.get(speakerIndex);
-    const existing = utteranceNodes.get(utteranceId);
-
-    if (!lane) {
-      if (existing && existing === pendingLane) {
-        lane = existing;
-        pendingLane = null;
-        lane.speakerIndex = speakerIndex;
-        paintSpeaker(lane);
-      } else {
-        lane = createLane(speakerIndex);
-      }
-      speakerLanes.set(speakerIndex, lane);
-    } else if (existing && existing !== lane && existing === pendingLane) {
-      existing.root.remove();
-      utteranceNodes.delete(utteranceId);
-      pendingLane = null;
-    }
-
-    if (lane.utteranceId !== utteranceId) {
-      clearLaneText(lane, { keepTranslation: true });
-      bindUtterance(lane, utteranceId);
-    }
-    return lane;
-  }
-
-  const existing = utteranceNodes.get(utteranceId);
-  if (existing) return existing;
-
-  if (!pendingLane) {
-    pendingLane = createLane(null);
-  }
-  if (pendingLane.utteranceId !== utteranceId) {
-    clearLaneText(pendingLane);
-    bindUtterance(pendingLane, utteranceId);
-  }
-  return pendingLane;
 }
 
 function updateSpeaker(utteranceId, speakerIndex) {
-  if (!Number.isInteger(speakerIndex)) return;
-  const oldNode = utteranceNodes.get(utteranceId);
-  const oldOriginal = oldNode?.original.textContent || '';
-  const oldTranslated = oldNode?.translated.textContent || '';
-  const oldFinal = Boolean(oldNode?.final);
+  const node = utteranceNodes.get(utteranceId);
+  if (!node || !Number.isInteger(speakerIndex)) return;
 
-  const lane = laneFor(utteranceId, speakerIndex);
-  lane.speakerIndex = speakerIndex;
-  paintSpeaker(lane);
-
-  if (oldNode && oldNode !== lane) {
-    oldNode.root.remove();
-    if (oldNode === pendingLane) pendingLane = null;
-  }
-
-  if (oldOriginal) lane.original.textContent = oldOriginal;
-  if (oldTranslated) lane.translated.textContent = oldTranslated;
-  lane.final = oldFinal;
+  node.speakerIndex = speakerIndex;
+  paintSpeaker(node);
 }
 
 function upsertUtterance(message) {
@@ -219,8 +168,8 @@ function upsertUtterance(message) {
   const utteranceId = Number(message.utteranceId);
   if (!Number.isInteger(utteranceId)) return;
 
-  const speakerIndex = Number.isInteger(message.speaker) ? message.speaker : null;
-  const node = laneFor(utteranceId, speakerIndex);
+  const node = utteranceNodes.get(utteranceId) || createUtteranceNode(utteranceId);
+  const firstContent = !node.original.textContent && !node.translated.textContent;
 
   if (typeof message.original === 'string' && message.original) {
     node.original.textContent = message.original;
@@ -230,19 +179,23 @@ function upsertUtterance(message) {
     node.translated.textContent = message.translated;
   }
 
-  node.root.classList.toggle('lt-translating', Boolean(message.translationPending));
-
-  if (Number.isInteger(speakerIndex)) {
-    node.speakerIndex = speakerIndex;
+  if (Number.isInteger(message.speaker)) {
+    node.speakerIndex = message.speaker;
     paintSpeaker(node);
   }
 
+  node.root.classList.toggle('lt-translating', Boolean(message.translationPending));
   node.final = Boolean(message.final);
   node.root.classList.toggle('lt-final', node.final);
   node.root.classList.toggle('lt-partial', !node.final);
 
+  // New utterances become the newest card. Updates to the same utterance stay
+  // in place so partial ASR doesn't constantly reorder the stack.
+  if (firstContent) moveToLatest(node);
+
   statusEl.textContent = '';
   show();
+  trimUtterances();
 
   if (node.final) scheduleHide(9000);
 }
@@ -250,21 +203,8 @@ function upsertUtterance(message) {
 function removeUtterance(utteranceId) {
   const node = utteranceNodes.get(utteranceId);
   if (!node) return;
-
+  node.root.remove();
   utteranceNodes.delete(utteranceId);
-
-  // Pending lanes are disposable. Persistent speaker lanes keep their last
-  // visible text until a newer utterance for that speaker replaces it.
-  if (node === pendingLane) {
-    node.root.remove();
-    pendingLane = null;
-    return;
-  }
-
-  if (node.utteranceId === utteranceId) {
-    node.utteranceId = null;
-    delete node.root.dataset.utteranceId;
-  }
 }
 
 function applySpeakerProfile(message) {
@@ -277,8 +217,9 @@ function applySpeakerProfile(message) {
     source: message.source || ''
   });
 
-  const lane = speakerLanes.get(message.speaker);
-  if (lane) paintSpeaker(lane);
+  for (const node of utteranceNodes.values()) {
+    if (node.speakerIndex === message.speaker) paintSpeaker(node);
+  }
 }
 
 function getPageContext() {
@@ -306,15 +247,8 @@ function getPageContext() {
 }
 
 function clearUtterances() {
-  for (const node of new Set(utteranceNodes.values())) node.root.remove();
-  for (const node of speakerLanes.values()) {
-    if (node.root.isConnected) node.root.remove();
-  }
-  if (pendingLane?.root.isConnected) pendingLane.root.remove();
-
+  for (const node of utteranceNodes.values()) node.root.remove();
   utteranceNodes.clear();
-  speakerLanes.clear();
-  pendingLane = null;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
