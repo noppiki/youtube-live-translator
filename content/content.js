@@ -3,6 +3,7 @@ let utteranceList;
 let statusEl;
 let hideTimer;
 const utteranceNodes = new Map();
+const speakerProfiles = new Map();
 
 function clampSize(value) {
   const n = Number(value);
@@ -10,10 +11,25 @@ function clampSize(value) {
   return Math.min(180, Math.max(70, Math.round(n / 10) * 10));
 }
 
-function speakerName(index) {
+function baseSpeakerName(index) {
   if (!Number.isInteger(index) || index < 0) return '話者 ?';
   const letter = String.fromCharCode(65 + (index % 26));
   return `話者 ${letter}`;
+}
+
+function speakerName(index) {
+  if (!Number.isInteger(index) || index < 0) return '話者 ?';
+  const profile = speakerProfiles.get(index);
+  if (!profile) return baseSpeakerName(index);
+
+  const name = String(profile.name || '').trim();
+  const role = String(profile.role || '').trim();
+  const confidence = Number(profile.confidence || 0);
+
+  if (name) {
+    return confidence >= 0.9 ? name : confidence >= 0.65 ? `${name}?` : (role || baseSpeakerName(index));
+  }
+  return role || baseSpeakerName(index);
 }
 
 function speakerHue(index) {
@@ -99,7 +115,8 @@ function updateSpeaker(utteranceId, speakerIndex) {
   const node = utteranceNodes.get(utteranceId);
   if (!node) return;
 
-  node.speaker.textContent = speakerName(speakerIndex);
+  node.speakerIndex = Number.isInteger(speakerIndex) ? speakerIndex : null;
+  node.speaker.textContent = speakerName(node.speakerIndex);
   node.speaker.style.setProperty('--lt-speaker-hue', String(speakerHue(speakerIndex)));
   node.speaker.classList.toggle('lt-speaker-pending', !Number.isInteger(speakerIndex));
 }
@@ -137,12 +154,56 @@ function upsertUtterance(message) {
   if (node.final) scheduleHide(9000);
 }
 
+function applySpeakerProfile(message) {
+  if (!Number.isInteger(message.speaker)) return;
+
+  speakerProfiles.set(message.speaker, {
+    name: message.name || '',
+    role: message.role || '',
+    confidence: Number(message.confidence || 0),
+    source: message.source || ''
+  });
+
+  for (const [utteranceId, node] of utteranceNodes.entries()) {
+    if (node.speakerIndex === message.speaker) updateSpeaker(utteranceId, message.speaker);
+  }
+}
+
+function getPageContext() {
+  const title =
+    document.querySelector('meta[name="title"]')?.content ||
+    document.querySelector('h1 yt-formatted-string')?.textContent ||
+    document.title.replace(/\s*-\s*YouTube\s*$/, '');
+
+  const channel =
+    document.querySelector('#owner #channel-name a')?.textContent ||
+    document.querySelector('ytd-channel-name a')?.textContent ||
+    '';
+
+  const description =
+    document.querySelector('meta[name="description"]')?.content ||
+    document.querySelector('meta[property="og:description"]')?.content ||
+    '';
+
+  return {
+    title: String(title || '').trim().slice(0, 300),
+    channel: String(channel || '').trim().slice(0, 200),
+    description: String(description || '').trim().slice(0, 1200),
+    url: location.href
+  };
+}
+
 function clearUtterances() {
   for (const node of utteranceNodes.values()) node.root.remove();
   utteranceNodes.clear();
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'LT_GET_PAGE_CONTEXT') {
+    sendResponse(getPageContext());
+    return;
+  }
+
   ensureOverlay();
 
   if (message.type === 'LT_SET_TRANSLATION_SIZE') {
@@ -157,6 +218,12 @@ chrome.runtime.onMessage.addListener((message) => {
 
   if (message.type === 'LT_UTTERANCE_SPEAKER') {
     updateSpeaker(Number(message.utteranceId), message.speaker);
+    show();
+    return;
+  }
+
+  if (message.type === 'LT_SPEAKER_PROFILE') {
+    applySpeakerProfile(message);
     show();
     return;
   }
