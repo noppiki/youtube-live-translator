@@ -124,8 +124,8 @@ function normalizeSourceLanguage(language) {
 
 function recentTranscript(text) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
-  if (clean.length <= 260) return clean;
-  const tail = clean.slice(-260);
+  if (clean.length <= 1200) return clean;
+  const tail = clean.slice(-1200);
   const cut = tail.search(/[.!?。！？]\s+/);
   return cut >= 0 ? tail.slice(cut + 1).trim() : tail;
 }
@@ -180,7 +180,8 @@ function translationGlossary() {
 
 async function translateWithLocalGemma(text, source, target) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeoutMs = text.length > 500 ? 12000 : text.length > 250 ? 8000 : 5000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch('http://127.0.0.1:8765/translate', {
       method: 'POST',
@@ -431,6 +432,7 @@ async function emitFinalSpeakerSegments(data) {
 
   sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: Number(data.utteranceId) });
 
+  let emitted = 0;
   for (let i = 0; i < groups.length; i += 1) {
     const group = remainingGroupAfterRolling(data, groups[i]);
     if (!group.text) continue;
@@ -446,6 +448,29 @@ async function emitFinalSpeakerSegments(data) {
       endMs: group.endMs,
       forcedSpeaker: group.speaker
     });
+    emitted += 1;
+  }
+
+  // A long turn can be completely consumed by rolling chunks immediately
+  // before EOU. In that case remainingGroupAfterRolling() returns empty for
+  // every group. Re-emit the final complete turn instead of deleting the live
+  // partial and leaving no subtitle on screen.
+  if (emitted === 0) {
+    for (let i = 0; i < groups.length; i += 1) {
+      const group = groups[i];
+      if (!group.text) continue;
+      const segmentId = liveSegmentId(data.utteranceId, i);
+      lockedUtteranceSpeakers.set(segmentId, group.speaker);
+      await emitUtterance({
+        utteranceId: segmentId,
+        text: group.text,
+        sourceLanguage: data.language || settings.sourceLanguage,
+        final: true,
+        startMs: group.startMs,
+        endMs: group.endMs,
+        forcedSpeaker: group.speaker
+      });
+    }
   }
 
   for (const key of [...rollingSpeakerChunks.keys()]) {
