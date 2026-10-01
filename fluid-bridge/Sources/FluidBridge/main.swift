@@ -1,5 +1,5 @@
 import AVFoundation
-import FluidAudio
+@preconcurrency import FluidAudio
 import Foundation
 
 struct BridgeConfig: Decodable {
@@ -22,17 +22,18 @@ final class JSONWriter: @unchecked Sendable {
     func send(_ output: Output) {
         lock.lock()
         defer { lock.unlock() }
+
         guard let data = try? encoder.encode(output),
               let line = String(data: data, encoding: .utf8) else { return }
+
         FileHandle.standardOutput.write((line + "\n").data(using: .utf8)!)
     }
 }
 
 actor SpeakerTracker {
-    private let diarizer = SortformerDiarizer(config: .default)
+    private let diarizer = SortformerDiarizer()
     private var loaded = false
     private var currentSpeaker: Int?
-    private var fedSeconds: Float = 0
     private let writer: JSONWriter
 
     init(writer: JSONWriter) {
@@ -47,28 +48,46 @@ actor SpeakerTracker {
 
     func feed(_ samples: [Float]) {
         guard loaded else { return }
+
         diarizer.addAudio(samples)
-        fedSeconds += Float(samples.count) / 16_000
 
         do {
             guard let update = try diarizer.process() else { return }
-            guard let latest = (update.finalizedSegments + update.tentativeSegments)
-                .max(by: { ($0.endFrame, $0.startFrame) < ($1.endFrame, $1.startFrame) }) else { return }
+
+            let latest = (update.finalizedSegments + update.tentativeSegments)
+                .max { ($0.endFrame, $0.startFrame) < ($1.endFrame, $1.startFrame) }
+
+            guard let latest else { return }
 
             if currentSpeaker == nil {
                 currentSpeaker = latest.speakerIndex
-                writer.send(Output(type: "speaker", speaker: latest.speakerIndex,
-                                   changeAtMs: Int(latest.startTime * 1000)))
+                writer.send(
+                    Output(
+                        type: "speaker",
+                        speaker: latest.speakerIndex,
+                        changeAtMs: Int(latest.startTime * 1000)
+                    )
+                )
                 return
             }
 
             if currentSpeaker != latest.speakerIndex, latest.duration >= 0.5 {
                 currentSpeaker = latest.speakerIndex
-                writer.send(Output(type: "speaker", speaker: latest.speakerIndex,
-                                   changeAtMs: Int(latest.startTime * 1000)))
+                writer.send(
+                    Output(
+                        type: "speaker",
+                        speaker: latest.speakerIndex,
+                        changeAtMs: Int(latest.startTime * 1000)
+                    )
+                )
             }
         } catch {
-            writer.send(Output(type: "warning", message: "Diarization: \(error.localizedDescription)"))
+            writer.send(
+                Output(
+                    type: "warning",
+                    message: "Diarization: \(error.localizedDescription)"
+                )
+            )
         }
     }
 
@@ -92,7 +111,10 @@ actor Engine {
     func configure(_ config: BridgeConfig) async throws {
         guard !configured else { return }
 
-        let asr = StreamingEouAsrManager(chunkSize: .ms320, eouDebounceMs: 960)
+        let asr = StreamingEouAsrManager(
+            chunkSize: .ms320,
+            eouDebounceMs: 960
+        )
         try await asr.loadModels()
         manager = asr
 
@@ -102,8 +124,12 @@ actor Engine {
                 try await tracker.load()
                 speakers = tracker
             } catch {
-                writer.send(Output(type: "warning",
-                                   message: "Speaker diarization unavailable: \(error.localizedDescription)"))
+                writer.send(
+                    Output(
+                        type: "warning",
+                        message: "Speaker diarization unavailable: \(error.localizedDescription)"
+                    )
+                )
             }
         }
 
@@ -112,19 +138,32 @@ actor Engine {
     }
 
     private static func pcmBuffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
-        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                         sampleRate: 16_000,
-                                         channels: 1,
-                                         interleaved: false),
-              let buffer = AVAudioPCMBuffer(pcmFormat: format,
-                                            frameCapacity: AVAudioFrameCount(samples.count)),
-              let channel = buffer.floatChannelData else { return nil }
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: false
+        ),
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(samples.count)
+        ),
+        let channel = buffer.floatChannelData else {
+            return nil
+        }
 
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer {
             channel[0].update(from: $0.baseAddress!, count: samples.count)
         }
         return buffer
+    }
+
+    private static func transcript(from tokens: [String]) -> String {
+        tokens.joined()
+            .replacingOccurrences(of: "▁", with: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
     }
 
     func feedPCM16(_ data: Data) async {
@@ -142,58 +181,95 @@ actor Engine {
         guard let buffer = Self.pcmBuffer(samples) else { return }
 
         do {
-            try await manager.appendAudio(buffer)
-            try await manager.processBufferedAudio()
-            let text = await manager.getPartialTranscript()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            _ = try await manager.process(audioBuffer: buffer)
+
+            let tokens = await manager.getRawTokenStrings()
+            let text = Self.transcript(from: tokens)
 
             if !text.isEmpty, text != lastText {
                 lastText = text
-                writer.send(Output(type: "partial", text: text, final: false))
+                writer.send(
+                    Output(
+                        type: "partial",
+                        text: text,
+                        final: false
+                    )
+                )
             }
         } catch {
-            writer.send(Output(type: "error", message: error.localizedDescription))
+            writer.send(
+                Output(
+                    type: "error",
+                    message: error.localizedDescription
+                )
+            )
         }
     }
 
     func finalize() async {
         guard let manager else { return }
+
         do {
             let text = try await manager.finish()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+
             if !text.isEmpty {
-                writer.send(Output(type: "final", text: text, final: true))
+                writer.send(
+                    Output(
+                        type: "final",
+                        text: text,
+                        final: true
+                    )
+                )
             }
-            try await manager.reset()
+
+            await manager.reset()
             lastText = ""
         } catch {
-            writer.send(Output(type: "error", message: error.localizedDescription))
+            writer.send(
+                Output(
+                    type: "error",
+                    message: error.localizedDescription
+                )
+            )
         }
     }
 
     func shutdown() async {
-        if let speakers { await speakers.shutdown() }
-        if let manager { await manager.cleanup() }
+        if let speakers {
+            await speakers.shutdown()
+        }
     }
 }
 
 func readExact(_ handle: FileHandle, count: Int) throws -> Data? {
     var data = Data()
+
     while data.count < count {
-        guard let chunk = try handle.read(upToCount: count - data.count), !chunk.isEmpty else {
+        guard let chunk = try handle.read(upToCount: count - data.count),
+              !chunk.isEmpty else {
             return data.isEmpty ? nil : data
         }
         data.append(chunk)
     }
+
     return data
 }
 
 func readFrame(_ handle: FileHandle) throws -> Data? {
-    guard let header = try readExact(handle, count: 4), header.count == 4 else { return nil }
+    guard let header = try readExact(handle, count: 4),
+          header.count == 4 else {
+        return nil
+    }
+
     let length = header.withUnsafeBytes { raw -> UInt32 in
         raw.loadUnaligned(as: UInt32.self).littleEndian
     }
-    guard length <= 4 * 1024 * 1024 else { throw NSError(domain: "FluidBridge", code: 1) }
+
+    guard length <= 4 * 1024 * 1024 else {
+        throw NSError(domain: "FluidBridge", code: 1)
+    }
+
     return try readExact(handle, count: Int(length))
 }
 
@@ -211,18 +287,34 @@ struct FluidBridge {
 
                 switch kind {
                 case 0:
-                    let config = try JSONDecoder().decode(BridgeConfig.self, from: Data(payload))
+                    let config = try JSONDecoder().decode(
+                        BridgeConfig.self,
+                        from: Data(payload)
+                    )
                     try await engine.configure(config)
+
                 case 1:
                     await engine.feedPCM16(Data(payload))
+
                 case 2:
                     await engine.finalize()
+
                 default:
-                    writer.send(Output(type: "warning", message: "Unknown frame type"))
+                    writer.send(
+                        Output(
+                            type: "warning",
+                            message: "Unknown frame type"
+                        )
+                    )
                 }
             }
         } catch {
-            writer.send(Output(type: "error", message: error.localizedDescription))
+            writer.send(
+                Output(
+                    type: "error",
+                    message: error.localizedDescription
+                )
+            )
         }
 
         await engine.shutdown()
