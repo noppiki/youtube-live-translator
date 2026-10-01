@@ -81,14 +81,16 @@ async function checkLocal(showStatus = false) {
     if (!data?.ok) throw new Error('not ready');
 
     const fluidReady = Boolean(data.fluidAudio?.available);
-    localBadge.textContent = fluidReady ? '接続済み · FluidAudio可' : '接続済み · Qwen3のみ';
+    localBadge.textContent = fluidReady
+      ? '接続済み · FluidAudio + Gemma 4 E4B'
+      : '接続済み · Qwen3-ASR + Gemma 4 E4B';
     localBadge.className = 'badge online';
     startLocal.disabled = true;
     startLocal.textContent = '起動済み';
     if (showStatus) {
       status.textContent = fluidReady
-        ? 'ローカルAIに接続できました。FluidAudio / Qwen3を利用できます。'
-        : 'ローカルAIに接続できました。FluidAudioは未導入なのでQwen3を利用します。';
+        ? '接続済み。音声認識: FluidAudio / Qwen3-ASR、英→日翻訳: Gemma 4 E4B。'
+        : '接続済み。音声認識: Qwen3-ASR、英→日翻訳: Gemma 4 E4B。';
     }
     return data;
   } catch {
@@ -123,8 +125,8 @@ function updateVisibility() {
   endpointingLabel.style.display = mode === 'local' ? 'none' : 'grid';
 
   qwenModelLabel.style.display = fluid ? 'none' : 'grid';
-  domainTermsLabel.style.display = fluid ? 'none' : 'grid';
-  domainTermsHint.style.display = fluid ? 'none' : 'block';
+  domainTermsLabel.style.display = 'grid';
+  domainTermsHint.style.display = 'block';
 
   diarization.disabled = !fluid || !english;
   if (!fluid || !english) {
@@ -142,7 +144,9 @@ function updateVisibility() {
     ? '会話・配信タイトル・チャンネル名・概要欄から推定します。確信度が低い場合は「名前?」または役割名で表示します。'
     : '話者名推定は、英語＋FluidAudio＋話者分離ONのとき利用できます。';
 
-  installModel.textContent = fluid ? (diarization.checked ? 'ASR＋話者モデル準備' : 'ASRモデル準備') : 'Qwen3モデル準備';
+  installModel.textContent = fluid
+    ? (diarization.checked ? '音声認識＋話者モデル準備' : '音声認識モデル準備')
+    : 'Qwen3-ASRモデル準備';
 }
 
 function updateInstallCommand() {
