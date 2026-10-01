@@ -263,14 +263,12 @@ function handleDeepgramMessage(event) {
         const complete = finalizedPieces.join(' ').replace(/\s+/g, ' ').trim();
         finalizedPieces = [];
         emitUtterance({
-          utteranceId: nextGenericUtteranceId,
           text: complete,
           sourceLanguage: detected,
           final: true
         });
       } else {
         emitUtterance({
-          utteranceId: nextGenericUtteranceId,
           text: finalizedPieces.join(' '),
           sourceLanguage: detected,
           final: false
@@ -279,7 +277,6 @@ function handleDeepgramMessage(event) {
     } else {
       const prefix = finalizedPieces.length ? `${finalizedPieces.join(' ')} ` : '';
       emitUtterance({
-        utteranceId: nextGenericUtteranceId,
         text: `${prefix}${transcript}`.trim(),
         sourceLanguage: detected,
         final: false
@@ -391,7 +388,6 @@ function openLocalSocket() {
         });
       } else if (data.type === 'partial' || data.type === 'final') {
         emitUtterance({
-          utteranceId: nextGenericUtteranceId,
           text: data.text || data.stableText || '',
           sourceLanguage: data.language || settings.sourceLanguage,
           final: data.type === 'final'
