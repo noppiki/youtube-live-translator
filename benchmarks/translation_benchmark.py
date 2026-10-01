@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from mlx_lm import load, stream_generate
+from mlx_lm.sample_utils import make_sampler
 
 MODELS = {
     "qwen": {
@@ -85,11 +86,11 @@ def run_one(model, tokenizer, model_kind, case, max_tokens):
         tokenizer,
         prompt=prompt,
         max_tokens=max_tokens,
-        temp=0.0,
+        sampler=make_sampler(temp=0.0),
     ):
-        if first is None:
-            first = time.perf_counter()
         text = getattr(response, "text", "")
+        if text and first is None:
+            first = time.perf_counter()
         if text:
             chunks.append(text)
         token_count += 1
