@@ -101,9 +101,9 @@ async function checkLocal(showStatus = false) {
     startLocal.textContent = 'ローカルAI起動';
 
     if (native.helperMissing) {
-      localBadge.textContent = 'ヘルパー未設定';
+      localBadge.textContent = 'ヘルパー未設定 / ID不一致';
       localBadge.className = 'badge offline';
-      if (showStatus) status.textContent = '起動ヘルパーが未設定です。「初回インストール / ローカルAI更新」を実行してください。';
+      if (showStatus) status.textContent = `起動ヘルパーが未設定、または拡張IDが一致していません（現在: ${chrome.runtime.id}）。下のインストールコマンドを再実行してください。`;
     } else if (native.installed) {
       localBadge.textContent = '停止中';
       localBadge.className = 'badge idle';
@@ -241,7 +241,7 @@ startLocal.addEventListener('click', async () => {
     startLocal.textContent = 'ローカルAI起動';
     const message = String(error?.message || error);
     if (/native messaging host|not found|forbidden/i.test(message)) {
-      status.textContent = '起動ヘルパーが未設定です。初回インストール / ローカルAI更新を実行してください。';
+      status.textContent = `起動ヘルパーが未設定、または拡張IDが不一致です（現在: ${chrome.runtime.id}）。初回インストール / ローカルAI更新を再実行してください。`;
     } else {
       status.textContent = `起動エラー: ${message}`;
     }
