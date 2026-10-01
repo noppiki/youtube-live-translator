@@ -12,7 +12,9 @@ let settings = null;
 let finalizedPieces = [];
 let translatorCache = new Map();
 let translateSequence = 0;
-let currentSpeaker = null;
+let nextGenericUtteranceId = 1;
+let speakerTimeline = [];
+let recentUtterances = new Map();
 
 const LANGUAGE_CODES = {
   English: 'en', Japanese: 'ja', Korean: 'ko', Chinese: 'zh',
@@ -132,24 +134,98 @@ async function translateText(text, sourceLanguage) {
   return translator ? translator.translate(text) : text;
 }
 
-async function emitSubtitle(text, sourceLanguage, final) {
+async function emitUtterance({
+  utteranceId,
+  text,
+  sourceLanguage,
+  final,
+  startMs = null,
+  endMs = null
+}) {
   const displayText = recentTranscript(text);
   if (!displayText) return;
+
+  const id = Number.isInteger(utteranceId) ? utteranceId : nextGenericUtteranceId;
+  if (!Number.isInteger(utteranceId) && final) nextGenericUtteranceId += 1;
+
+  if (Number.isFinite(startMs) || Number.isFinite(endMs)) {
+    recentUtterances.set(id, {
+      startMs: Number.isFinite(startMs) ? startMs : null,
+      endMs: Number.isFinite(endMs) ? endMs : null
+    });
+    if (recentUtterances.size > 12) {
+      const oldest = [...recentUtterances.keys()].sort((a, b) => a - b)[0];
+      recentUtterances.delete(oldest);
+    }
+  }
+
+  const speaker = speakerForUtterance(id);
   const sequence = ++translateSequence;
-  sendOverlay('LT_TRANSCRIPT', { text: displayText, final });
+
+  sendOverlay('LT_UTTERANCE', {
+    utteranceId: id,
+    original: displayText,
+    translated: '',
+    final,
+    speaker,
+    startMs,
+    endMs
+  });
 
   try {
     const translated = await translateText(displayText, sourceLanguage);
-    if (!running || sequence < translateSequence - 4) return;
-    sendOverlay('LT_TRANSLATION', {
+    if (!running || sequence < translateSequence - 6) return;
+    sendOverlay('LT_UTTERANCE', {
+      utteranceId: id,
       original: displayText,
       translated,
       final,
+      speaker: speakerForUtterance(id),
       sourceLanguage: normalizeSourceLanguage(sourceLanguage),
-      speaker: currentSpeaker
+      startMs,
+      endMs
     });
   } catch (error) {
     sendOverlay('LT_STATUS', { state: 'error', message: error?.message || String(error) });
+  }
+}
+
+function speakerForUtterance(utteranceId) {
+  const interval = recentUtterances.get(utteranceId);
+  if (!interval) return null;
+
+  const start = Number.isFinite(interval.startMs) ? interval.startMs : 0;
+  const end = Number.isFinite(interval.endMs) ? interval.endMs : start;
+  const midpoint = start + Math.max(0, end - start) / 2;
+
+  let speaker = null;
+  for (const point of speakerTimeline) {
+    if (point.changeAtMs <= midpoint) speaker = point.speaker;
+    else break;
+  }
+  return speaker;
+}
+
+function addSpeakerPoint(speaker, changeAtMs) {
+  if (!Number.isInteger(speaker) || !Number.isFinite(changeAtMs)) return;
+
+  const existing = speakerTimeline.find(
+    (point) => point.speaker === speaker && Math.abs(point.changeAtMs - changeAtMs) < 120
+  );
+  if (!existing) {
+    speakerTimeline.push({ speaker, changeAtMs });
+    speakerTimeline.sort((a, b) => a.changeAtMs - b.changeAtMs);
+    if (speakerTimeline.length > 32) speakerTimeline = speakerTimeline.slice(-32);
+  }
+
+  for (const utteranceId of recentUtterances.keys()) {
+    const resolved = speakerForUtterance(utteranceId);
+    if (Number.isInteger(resolved)) {
+      sendOverlay('LT_UTTERANCE_SPEAKER', {
+        utteranceId,
+        speaker: resolved
+      });
+    }
   }
 }
 
@@ -186,13 +262,28 @@ function handleDeepgramMessage(event) {
       if (data.speech_final) {
         const complete = finalizedPieces.join(' ').replace(/\s+/g, ' ').trim();
         finalizedPieces = [];
-        emitSubtitle(complete, detected, true);
+        emitUtterance({
+          utteranceId: nextGenericUtteranceId,
+          text: complete,
+          sourceLanguage: detected,
+          final: true
+        });
       } else {
-        emitSubtitle(finalizedPieces.join(' '), detected, false);
+        emitUtterance({
+          utteranceId: nextGenericUtteranceId,
+          text: finalizedPieces.join(' '),
+          sourceLanguage: detected,
+          final: false
+        });
       }
     } else {
       const prefix = finalizedPieces.length ? `${finalizedPieces.join(' ')} ` : '';
-      emitSubtitle(`${prefix}${transcript}`.trim(), detected, false);
+      emitUtterance({
+        utteranceId: nextGenericUtteranceId,
+        text: `${prefix}${transcript}`.trim(),
+        sourceLanguage: detected,
+        final: false
+      });
     }
   }
 }
@@ -289,14 +380,24 @@ function openLocalSocket() {
         }
         return;
       }
-      if (data.type === 'partial' || data.type === 'final') {
-        emitSubtitle(data.text || data.stableText || '', data.language || settings.sourceLanguage, data.type === 'final');
-      } else if (data.type === 'speaker') {
-        currentSpeaker = Number.isInteger(data.speaker) ? data.speaker : null;
-        sendOverlay('LT_SPEAKER', {
-          speaker: currentSpeaker,
-          changeAtMs: data.changeAtMs ?? null
+      if (data.type === 'utterance') {
+        emitUtterance({
+          utteranceId: data.utteranceId,
+          text: data.text || '',
+          sourceLanguage: data.language || settings.sourceLanguage,
+          final: Boolean(data.final),
+          startMs: data.startMs,
+          endMs: data.endMs
         });
+      } else if (data.type === 'partial' || data.type === 'final') {
+        emitUtterance({
+          utteranceId: nextGenericUtteranceId,
+          text: data.text || data.stableText || '',
+          sourceLanguage: data.language || settings.sourceLanguage,
+          final: data.type === 'final'
+        });
+      } else if (data.type === 'speaker') {
+        addSpeakerPoint(data.speaker, data.changeAtMs);
       } else if (data.type === 'warning') {
         sendOverlay('LT_STATUS', { state: 'warning', message: data.message || 'ローカルAI警告' });
       } else if (data.type === 'error') {
@@ -395,7 +496,9 @@ async function stopAll({ announce = true } = {}) {
     activeSocket = null;
   }
   activeProvider = null;
-  currentSpeaker = null;
+  nextGenericUtteranceId = 1;
+  speakerTimeline = [];
+  recentUtterances = new Map();
 
   if (keepAliveTimer) {
     clearInterval(keepAliveTimer);
