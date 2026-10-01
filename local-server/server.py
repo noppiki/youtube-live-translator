@@ -269,6 +269,11 @@ async def stream(request: web.Request):
         if backend == "fluid":
             if not _is_english(language):
                 raise ValueError("FluidAudio live ASR is currently enabled for English only.")
+            await ws.send_json({
+                "type": "preparing",
+                "backend": "fluid",
+                "message": "FluidAudioモデルを準備しています…",
+            })
             fluid = FluidProcess(diarization=want_diarization)
             await fluid.start()
             fluid_pump = asyncio.create_task(pump_fluid())
@@ -287,6 +292,11 @@ async def stream(request: web.Request):
         model_id = config.get("model") or DEFAULT_MODEL
         if model_id not in {v["id"] for v in MODELS.values()}:
             raise ValueError("Unsupported local model")
+        await ws.send_json({
+            "type": "preparing",
+            "backend": "qwen",
+            "message": "Qwen3-ASRモデルを読み込んでいます…",
+        })
         session = await get_session(model_id)
         kwargs = {
             "chunk_size_sec": float(config.get("chunkSizeSec", 1.0)),
