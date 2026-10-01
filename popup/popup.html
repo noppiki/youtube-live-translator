@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Live Translator</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <h1>Live Translator</h1>
+    <p class="lead">YouTube Live の音声をリアルタイム文字起こし → 日本語翻訳します。</p>
+
+    <label>
+      Deepgram APIキー
+      <input id="apiKey" type="password" autocomplete="off" placeholder="dg_... / project key">
+    </label>
+    <p class="hint">MVPではキーをこのChromeプロファイルの <code>chrome.storage.local</code> に保存します。公開配布版では短期トークン方式に変えてください。</p>
+
+    <div class="grid">
+      <label>
+        音声言語
+        <select id="sourceLanguage">
+          <option value="en">英語</option>
+          <option value="multi">多言語</option>
+          <option value="auto">自動検出</option>
+          <option value="ja">日本語</option>
+          <option value="ko">韓国語</option>
+          <option value="zh">中国語</option>
+          <option value="es">スペイン語</option>
+          <option value="fr">フランス語</option>
+          <option value="de">ドイツ語</option>
+        </select>
+      </label>
+
+      <label>
+        翻訳先
+        <select id="targetLanguage">
+          <option value="ja">日本語</option>
+          <option value="en">英語</option>
+        </select>
+      </label>
+    </div>
+
+    <label>
+      区切りの速さ
+      <select id="endpointingMs">
+        <option value="220">最速（220ms）</option>
+        <option value="350" selected>バランス（350ms）</option>
+        <option value="500">自然（500ms）</option>
+      </select>
+    </label>
+
+    <div class="buttons">
+      <button id="start" class="primary">翻訳開始</button>
+      <button id="stop">停止</button>
+    </div>
+
+    <div id="status" class="status">停止中</div>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
