@@ -100,6 +100,7 @@ class FluidProcess:
                     continue
                 if message.get("type") == "ready":
                     self.ready.set()
+                    continue
                 await self.queue.put(message)
         finally:
             await self.queue.put({"type": "closed"})
