@@ -19,6 +19,7 @@ let utteranceTranslationSeq = new Map();
 let finalTranslationCache = new Map();
 let lockedUtteranceSpeakers = new Map();
 let liveSplitIds = new Map();
+let turnFinalizedIds = new Set();
 let speakerProfiles = new Map();
 let speakerInferenceSession = null;
 let speakerInferenceBusy = false;
@@ -178,7 +179,7 @@ function splitFinalBySpeaker(data) {
     current.times.push(times[i]);
   }
 
-  const useful = groups
+  let useful = groups
     .map((group) => ({
       speaker: group.speaker,
       text: cleanTokenText(group.tokens),
@@ -187,11 +188,25 @@ function splitFinalBySpeaker(data) {
     }))
     .filter((group) => group.text);
 
-  return useful.length > 1 ? useful : null;
+  // Sortformer can report the first stable speaker slightly after ASR begins.
+  // Fold a short leading unknown fragment into the first known speaker instead
+  // of leaving the live lane stuck at "話者 ?".
+  if (useful.length >= 2 && useful[0].speaker === null && Number.isInteger(useful[1].speaker)) {
+    useful[1] = {
+      ...useful[1],
+      text: `${useful[0].text} ${useful[1].text}`.replace(/\s+/g, ' ').trim(),
+      startMs: useful[0].startMs
+    };
+    useful = useful.slice(1);
+  }
+
+  if (!useful.length) return null;
+  if (!useful.some((group) => Number.isInteger(group.speaker))) return null;
+  return useful;
 }
 
 function liveSegmentId(baseId, index) {
-  return Number(baseId) * 1000 + index + 1;
+  return Number(baseId) * 100 + index + 1;
 }
 
 function clearLiveSplit(baseId) {
@@ -218,6 +233,27 @@ function emitPartialSpeakerSegments(data) {
     const id = liveSegmentId(data.utteranceId, index);
     newIds.push(id);
     oldIds.delete(id);
+
+    const isCompletedTurn = index < groups.length - 1 && Number.isInteger(group.speaker);
+    if (isCompletedTurn) {
+      if (!turnFinalizedIds.has(id)) {
+        turnFinalizedIds.add(id);
+        lockedUtteranceSpeakers.set(id, group.speaker);
+        emitUtterance({
+          utteranceId: id,
+          text: group.text,
+          sourceLanguage: data.language || settings.sourceLanguage,
+          final: true,
+          startMs: group.startMs,
+          endMs: group.endMs,
+          forcedSpeaker: group.speaker
+        });
+      }
+      return;
+    }
+
+    if (turnFinalizedIds.has(id)) return;
+
     sendOverlay('LT_UTTERANCE', {
       utteranceId: id,
       original: group.text,
@@ -246,7 +282,7 @@ async function emitFinalSpeakerSegments(data) {
 
   for (let i = 0; i < groups.length; i += 1) {
     const group = groups[i];
-    const segmentId = Number(data.utteranceId) * 100 + i + 1;
+    const segmentId = liveSegmentId(data.utteranceId, i);
     lockedUtteranceSpeakers.set(segmentId, group.speaker);
     await emitUtterance({
       utteranceId: segmentId,
@@ -913,6 +949,7 @@ async function stopAll({ announce = true } = {}) {
   finalTranslationCache = new Map();
   lockedUtteranceSpeakers = new Map();
   liveSplitIds = new Map();
+  turnFinalizedIds = new Set();
   speakerProfiles = new Map();
   finalizedConversation = [];
   clearTimeout(speakerInferenceTimer);
