@@ -17,13 +17,29 @@ function baseSpeakerName(index) {
   return `話者 ${letter}`;
 }
 
+function localizedRole(role) {
+  const value = String(role || '').trim();
+  const map = {
+    host: 'ホスト',
+    guest: 'ゲスト',
+    interviewer: 'インタビュアー',
+    interviewee: 'ゲスト',
+    presenter: '登壇者',
+    speaker: '登壇者',
+    commentator: '解説者',
+    moderator: '司会',
+    panelist: 'パネリスト'
+  };
+  return map[value.toLowerCase()] || value;
+}
+
 function speakerName(index) {
   if (!Number.isInteger(index) || index < 0) return '話者 ?';
   const profile = speakerProfiles.get(index);
   if (!profile) return baseSpeakerName(index);
 
   const name = String(profile.name || '').trim();
-  const role = String(profile.role || '').trim();
+  const role = localizedRole(profile.role);
   const confidence = Number(profile.confidence || 0);
 
   if (name) {
