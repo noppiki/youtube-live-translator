@@ -193,6 +193,8 @@ async function emitFinalSpeakerSegments(data) {
   const groups = splitFinalBySpeaker(data);
   if (!groups) return false;
 
+  sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: Number(data.utteranceId) });
+
   for (let i = 0; i < groups.length; i += 1) {
     const group = groups[i];
     const segmentId = Number(data.utteranceId) * 100 + i + 1;
@@ -241,6 +243,9 @@ async function emitUtterance({
   const speaker = Number.isInteger(forcedSpeaker)
     ? forcedSpeaker
     : (final ? (lockedUtteranceSpeakers.get(id) ?? speakerForUtterance(id)) : null);
+  if (final && Number.isInteger(speaker)) {
+    lockedUtteranceSpeakers.set(id, speaker);
+  }
 
   // Partial ASR updates are intentionally NOT translated.
   // This keeps the original transcript live while preventing the translated
