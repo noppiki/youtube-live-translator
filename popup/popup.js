@@ -2,7 +2,9 @@ const $ = (s) => document.querySelector(s);
 const NATIVE_HOST = 'com.noppiki.youtube_live_translator';
 
 const engineMode = $('#engineMode');
+const localBackend = $('#localBackend');
 const localModel = $('#localModel');
+const qwenModelLabel = $('#qwenModelLabel');
 const localBadge = $('#localBadge');
 const startLocal = $('#startLocal');
 const testLocal = $('#testLocal');
@@ -15,7 +17,12 @@ const sourceLanguage = $('#sourceLanguage');
 const targetLanguage = $('#targetLanguage');
 const translationSize = $('#translationSize');
 const translationSizeValue = $('#translationSizeValue');
+const diarization = $('#diarization');
+const diarizationLabel = $('#diarizationLabel');
+const diarizationHint = $('#diarizationHint');
 const domainTerms = $('#domainTerms');
+const domainTermsLabel = $('#domainTermsLabel');
+const domainTermsHint = $('#domainTermsHint');
 const endpointingMs = $('#endpointingMs');
 const endpointingLabel = $('#endpointingLabel');
 const startButton = $('#start');
@@ -24,11 +31,13 @@ const status = $('#status');
 
 const DEFAULTS = {
   engineMode: 'auto',
+  localBackend: 'auto',
   localModel: 'moona3k/mlx-qwen3-asr-0.6b-4bit',
   deepgramApiKey: '',
   sourceLanguage: 'en',
   targetLanguage: 'ja',
   translationSize: 100,
+  diarization: false,
   domainTerms: 'OpenAI\nAnthropic\nClaude\nGemini\nCursor\nCodex\nMCP\nNVIDIA',
   endpointingMs: 350
 };
@@ -51,6 +60,12 @@ async function nativeStatus() {
   }
 }
 
+function effectiveLocalBackend() {
+  if (localBackend.value === 'fluid') return 'fluid';
+  if (localBackend.value === 'qwen') return 'qwen';
+  return sourceLanguage.value === 'en' ? 'fluid' : 'qwen';
+}
+
 async function checkLocal(showStatus = false) {
   try {
     const controller = new AbortController();
@@ -60,38 +75,62 @@ async function checkLocal(showStatus = false) {
     const data = await response.json();
     if (!data?.ok) throw new Error('not ready');
 
-    localBadge.textContent = '接続済み';
+    const fluidReady = Boolean(data.fluidAudio?.available);
+    localBadge.textContent = fluidReady ? '接続済み · FluidAudio可' : '接続済み · Qwen3のみ';
     localBadge.className = 'badge online';
     startLocal.disabled = true;
     startLocal.textContent = '起動済み';
-    if (showStatus) status.textContent = 'ローカルエンジンに接続できました。';
-    return true;
+    if (showStatus) {
+      status.textContent = fluidReady
+        ? 'ローカルAIに接続できました。FluidAudio / Qwen3を利用できます。'
+        : 'ローカルAIに接続できました。FluidAudioは未導入なのでQwen3を利用します。';
+    }
+    return data;
   } catch {
     const native = await nativeStatus();
     startLocal.disabled = false;
-    startLocal.textContent = 'ローカル起動';
+    startLocal.textContent = 'ローカルAI起動';
 
     if (native.helperMissing) {
       localBadge.textContent = 'ヘルパー未設定';
       localBadge.className = 'badge offline';
-      if (showStatus) status.textContent = '起動ヘルパーが未設定です。「初回インストール / 起動ヘルパー更新」を一度実行してください。';
+      if (showStatus) status.textContent = '起動ヘルパーが未設定です。「初回インストール / ローカルAI更新」を実行してください。';
     } else if (native.installed) {
       localBadge.textContent = '停止中';
       localBadge.className = 'badge idle';
-      if (showStatus) status.textContent = 'Qwen3はインストール済みですが、ローカルサービスが停止しています。';
+      if (showStatus) status.textContent = 'ローカルAIはインストール済みですが停止しています。';
     } else {
       localBadge.textContent = '未インストール';
       localBadge.className = 'badge offline';
-      if (showStatus) status.textContent = 'ローカルエンジンが未インストールです。初回インストールを実行してください。';
+      if (showStatus) status.textContent = 'ローカルAIが未インストールです。初回インストールを実行してください。';
     }
-    return false;
+    return null;
   }
 }
 
 function updateVisibility() {
   const mode = engineMode.value;
+  const backend = effectiveLocalBackend();
+  const fluid = backend === 'fluid';
+  const english = sourceLanguage.value === 'en';
+
   apiKeyLabel.style.display = mode === 'local' ? 'none' : 'grid';
   endpointingLabel.style.display = mode === 'local' ? 'none' : 'grid';
+
+  qwenModelLabel.style.display = fluid ? 'none' : 'grid';
+  domainTermsLabel.style.display = fluid ? 'none' : 'grid';
+  domainTermsHint.style.display = fluid ? 'none' : 'block';
+
+  diarization.disabled = !fluid || !english;
+  if (!fluid || !english) {
+    diarizationHint.textContent = english
+      ? '話者分離を使うにはローカルバックエンドをFluidAudioまたは自動にしてください。'
+      : '現在のライブ話者分離は英語＋FluidAudio時のみ利用できます。';
+  } else {
+    diarizationHint.textContent = 'Sortformerで話者A/B…を推定します。判定は字幕より少し遅れて追従します。';
+  }
+
+  installModel.textContent = fluid ? (diarization.checked ? 'ASR＋話者モデル準備' : 'ASRモデル準備') : 'Qwen3モデル準備';
 }
 
 function updateInstallCommand() {
@@ -102,12 +141,14 @@ function updateInstallCommand() {
 async function load() {
   const stored = await chrome.storage.local.get(DEFAULTS);
   engineMode.value = stored.engineMode;
+  localBackend.value = stored.localBackend;
   localModel.value = stored.localModel;
   apiKey.value = stored.deepgramApiKey || '';
   sourceLanguage.value = stored.sourceLanguage;
   targetLanguage.value = stored.targetLanguage;
   translationSize.value = String(stored.translationSize || 100);
   translationSizeValue.value = `${translationSize.value}%`;
+  diarization.checked = Boolean(stored.diarization);
   domainTerms.value = stored.domainTerms || '';
   endpointingMs.value = String(stored.endpointingMs || 350);
 
@@ -120,11 +161,13 @@ async function load() {
 function readSettings() {
   return {
     engineMode: engineMode.value,
+    localBackend: localBackend.value,
     localModel: localModel.value,
     deepgramApiKey: apiKey.value.trim(),
     sourceLanguage: sourceLanguage.value,
     targetLanguage: targetLanguage.value,
     translationSize: Number(translationSize.value),
+    diarization: Boolean(diarization.checked),
     domainTerms: domainTerms.value,
     endpointingMs: Number(endpointingMs.value)
   };
@@ -151,7 +194,8 @@ async function sendSizeToActiveTab() {
 async function refreshStatus() {
   const response = await chrome.runtime.sendMessage({ target: 'background', type: 'GET_STATUS' }).catch(() => null);
   const isRunning = Boolean(response?.running);
-  status.textContent = isRunning ? '● ライブ翻訳中' : '停止中';
+  const provider = response?.provider ? ` · ${response.provider}` : '';
+  status.textContent = isRunning ? `● ライブ翻訳中${provider}` : '停止中';
   startButton.disabled = isRunning;
   stopButton.disabled = !isRunning;
 }
@@ -161,23 +205,21 @@ testLocal.addEventListener('click', () => checkLocal(true));
 startLocal.addEventListener('click', async () => {
   startLocal.disabled = true;
   startLocal.textContent = '起動中…';
-  status.textContent = 'ローカルQwen3を起動しています…';
+  status.textContent = 'ローカルAIサービスを起動しています…';
 
   try {
     const response = await sendNative('start');
-    if (!response?.ok) {
-      throw new Error(response?.error || '起動に失敗しました');
-    }
+    if (!response?.ok) throw new Error(response?.error || '起動に失敗しました');
 
     const ready = await checkLocal(false);
     if (!ready) throw new Error('サービスを起動しましたが接続確認に失敗しました。');
-    status.textContent = 'ローカルQwen3を起動しました。';
+    status.textContent = 'ローカルAIサービスを起動しました。';
   } catch (error) {
     startLocal.disabled = false;
-    startLocal.textContent = 'ローカル起動';
+    startLocal.textContent = 'ローカルAI起動';
     const message = String(error?.message || error);
     if (/native messaging host|not found|forbidden/i.test(message)) {
-      status.textContent = '起動ヘルパーが未設定です。初回インストール / 起動ヘルパー更新を一度実行してください。';
+      status.textContent = '起動ヘルパーが未設定です。初回インストール / ローカルAI更新を実行してください。';
     } else {
       status.textContent = `起動エラー: ${message}`;
     }
@@ -186,22 +228,36 @@ startLocal.addEventListener('click', async () => {
 });
 
 installModel.addEventListener('click', async () => {
-  status.textContent = 'モデルを準備しています…初回はダウンロードに時間がかかります。';
+  const health = await checkLocal(false);
+  if (!health) {
+    status.textContent = '先に「ローカルAI起動」でサービスを起動してください。';
+    return;
+  }
+
+  const backend = effectiveLocalBackend();
+  status.textContent = backend === 'fluid'
+    ? 'FluidAudioモデルを準備しています…初回は数百MBのダウンロードがあります。'
+    : 'Qwen3モデルを準備しています…';
+
   try {
-    if (!(await checkLocal(false))) {
-      status.textContent = '先に「ローカル起動」でQwen3サービスを起動してください。';
-      return;
-    }
+    const body = backend === 'fluid'
+      ? { engine: 'fluid', diarization: Boolean(diarization.checked) }
+      : { engine: 'qwen', model: localModel.value };
+
     const response = await fetch('http://127.0.0.1:8765/models/install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: localModel.value })
+      body: JSON.stringify(body)
     });
+    if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
     if (!data?.ok) throw new Error('モデル準備に失敗しました');
-    status.textContent = 'モデルの準備が完了しました。';
+
+    status.textContent = backend === 'fluid'
+      ? 'FluidAudioモデルの準備が完了しました。'
+      : 'Qwen3モデルの準備が完了しました。';
   } catch (error) {
-    status.textContent = `エラー: ${error?.message || 'ローカルエンジンへ接続できません'}`;
+    status.textContent = `モデル準備エラー: ${error?.message || error}`;
   }
 });
 
@@ -214,6 +270,7 @@ translationSize.addEventListener('input', sendSizeToActiveTab);
 
 startButton.addEventListener('click', async () => {
   const settings = readSettings();
+
   if (settings.engineMode === 'deepgram' && !settings.deepgramApiKey) {
     status.textContent = 'Deepgram APIキーを入力してください。';
     apiKey.focus();
@@ -221,7 +278,13 @@ startButton.addEventListener('click', async () => {
   }
 
   if (settings.engineMode === 'local' && !(await checkLocal(false))) {
-    status.textContent = 'ローカルエンジンが停止しています。「ローカル起動」を押してください。';
+    status.textContent = 'ローカルAIが停止しています。「ローカルAI起動」を押してください。';
+    return;
+  }
+
+  const backend = effectiveLocalBackend();
+  if (settings.diarization && (backend !== 'fluid' || settings.sourceLanguage !== 'en')) {
+    status.textContent = '話者分離は英語＋FluidAudio時のみ利用できます。';
     return;
   }
 
@@ -253,12 +316,15 @@ stopButton.addEventListener('click', async () => {
   startButton.disabled = false;
 });
 
-for (const control of [engineMode, localModel, apiKey, sourceLanguage, targetLanguage, domainTerms, endpointingMs]) {
+for (const control of [
+  engineMode, localBackend, localModel, apiKey, sourceLanguage,
+  targetLanguage, diarization, domainTerms, endpointingMs
+]) {
   control.addEventListener('change', async () => {
     updateVisibility();
     await saveSettings();
   });
 }
-domainTerms.addEventListener('input', saveSettings);
 
+domainTerms.addEventListener('input', saveSettings);
 load();
