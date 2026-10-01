@@ -27,15 +27,38 @@ def levenshtein(a, b):
     return prev[-1]
 
 
+def canonicalize_asr_display(text):
+    value = normalize_text(text)
+    replacements = {
+        "gemma four": "gemma4",
+        "nine sixty": "960",
+        "six forty": "640",
+        "nine hundred sixty": "960",
+        "six hundred forty": "640",
+    }
+    for src, dst in replacements.items():
+        value = value.replace(src, dst)
+    return value
+
+
 def error_rates(reference, hypothesis):
     ref = normalize_text(reference)
     hyp = normalize_text(hypothesis)
     ref_words, hyp_words = ref.split(), hyp.split()
     ref_chars = list(ref.replace(" ", ""))
     hyp_chars = list(hyp.replace(" ", ""))
+
+    canon_ref = canonicalize_asr_display(reference)
+    canon_hyp = canonicalize_asr_display(hypothesis)
+    canon_ref_words, canon_hyp_words = canon_ref.split(), canon_hyp.split()
+
     return {
         "wer": round(levenshtein(ref_words, hyp_words) / max(1, len(ref_words)), 4),
         "cer": round(levenshtein(ref_chars, hyp_chars) / max(1, len(ref_chars)), 4),
+        "display_normalized_wer": round(
+            levenshtein(canon_ref_words, canon_hyp_words) / max(1, len(canon_ref_words)),
+            4,
+        ),
     }
 
 
@@ -137,7 +160,11 @@ def main():
         results.append(row)
         print(f"load={row['load_s']}s transcribe={row['transcribe_s']}s", flush=True)
         if reference:
-            print(f"WER={row['wer']} CER={row['cer']}", flush=True)
+            print(
+                f"WER={row['wer']} CER={row['cer']} "
+                f"display-normalized-WER={row['display_normalized_wer']}",
+                flush=True,
+            )
         print(row["text"], flush=True)
 
     Path(args.output).write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
