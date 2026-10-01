@@ -102,3 +102,28 @@ Run Gemma 4 E4B:
 
 The multilingual set tests casual speech, technical terminology, negation and numbers/units.
 Use the same source strings when comparing against Chrome Translator so quality can be reviewed side-by-side.
+
+
+## ASR benchmark: Gemma 4 audio vs Qwen3-ASR
+
+Use a short real-world WAV/MP3 clip:
+
+```bash
+./scripts/benchmark-asr.sh /path/to/clip.wav --language English
+```
+
+For accuracy scoring, provide the exact reference transcript:
+
+```bash
+./scripts/benchmark-asr.sh /path/to/clip.wav \
+  --language English \
+  --reference-file /path/to/reference.txt
+```
+
+Models tested by default:
+
+- `gemma4e4b`: `mlx-community/gemma-4-e4b-it-4bit` via `mlx-vlm`
+- `qwen06`: Qwen3-ASR 0.6B 4-bit
+- `qwen17`: Qwen3-ASR 1.7B 4-bit
+
+The JSON output records model load time, transcription time, transcript, and WER/CER when a reference is supplied.
