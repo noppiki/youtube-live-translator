@@ -1,41 +1,71 @@
 #live-translator-overlay {
   --lt-translation-scale: 1;
-  --lt-speaker-hue: 210;
   position: fixed;
   left: 50%;
-  bottom: 9vh;
+  bottom: 8vh;
   transform: translateX(-50%);
   z-index: 2147483646;
-  width: min(86vw, 1100px);
+  width: min(88vw, 1120px);
   display: none;
   pointer-events: none;
-  text-align: center;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-#live-translator-overlay.lt-visible { display: block; }
+#live-translator-overlay.lt-visible {
+  display: block;
+}
 
-#live-translator-overlay .lt-speaker {
-  margin: 0 auto 3px;
-  padding: 3px 9px;
+#live-translator-overlay .lt-utterance-list {
+  display: grid;
+  gap: 8px;
+}
+
+#live-translator-overlay .lt-utterance {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  max-width: 100%;
+  opacity: 0.8;
+}
+
+#live-translator-overlay .lt-utterance:last-child {
+  opacity: 1;
+}
+
+#live-translator-overlay .lt-utterance-speaker {
+  --lt-speaker-hue: 0;
+  margin-top: 2px;
+  padding: 4px 9px;
   border-radius: 999px;
-  background: hsla(var(--lt-speaker-hue), 72%, 45%, 0.9);
+  background: hsla(var(--lt-speaker-hue), 72%, 45%, 0.92);
   color: #fff;
   font-size: 13px;
   font-weight: 800;
   line-height: 1.2;
+  white-space: nowrap;
   text-shadow: 0 1px 2px #000;
+}
+
+#live-translator-overlay .lt-speaker-pending {
+  background: rgba(90, 90, 90, 0.85);
+}
+
+#live-translator-overlay .lt-utterance-body {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  text-align: left;
 }
 
 #live-translator-overlay .lt-original,
 #live-translator-overlay .lt-translated,
 #live-translator-overlay .lt-status {
-  display: table;
+  width: fit-content;
   max-width: 100%;
-  margin: 4px auto;
-  padding: 5px 12px;
+  padding: 5px 11px;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.74);
+  background: rgba(0, 0, 0, 0.76);
   color: #fff;
   text-shadow: 0 1px 3px #000;
   line-height: 1.35;
@@ -44,20 +74,30 @@
 }
 
 #live-translator-overlay .lt-original {
-  font-size: clamp(16px, 1.45vw, 25px);
-  opacity: 0.9;
+  font-size: clamp(14px, 1.3vw, 22px);
+  opacity: 0.88;
 }
 
 #live-translator-overlay .lt-translated {
   font-size: clamp(
-    calc(21px * var(--lt-translation-scale)),
-    calc(2vw * var(--lt-translation-scale)),
-    calc(34px * var(--lt-translation-scale))
+    calc(20px * var(--lt-translation-scale)),
+    calc(1.9vw * var(--lt-translation-scale)),
+    calc(32px * var(--lt-translation-scale))
   );
-  font-weight: 700;
+  font-weight: 750;
+}
+
+#live-translator-overlay .lt-utterance.lt-partial .lt-translated:empty::after {
+  content: "翻訳中…";
+  opacity: 0.58;
+  font-size: 0.72em;
+  font-weight: 600;
 }
 
 #live-translator-overlay .lt-status {
-  font-size: 14px;
+  display: table;
+  margin: 7px auto 0;
+  font-size: 13px;
   opacity: 0.84;
+  text-align: center;
 }
