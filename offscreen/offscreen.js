@@ -18,6 +18,7 @@ let recentUtterances = new Map();
 let utteranceTranslationSeq = new Map();
 let finalTranslationCache = new Map();
 let lockedUtteranceSpeakers = new Map();
+let liveSplitIds = new Map();
 let speakerProfiles = new Map();
 let speakerInferenceSession = null;
 let speakerInferenceBusy = false;
@@ -189,8 +190,56 @@ function splitFinalBySpeaker(data) {
   return useful.length > 1 ? useful : null;
 }
 
+function liveSegmentId(baseId, index) {
+  return Number(baseId) * 1000 + index + 1;
+}
+
+function clearLiveSplit(baseId) {
+  const ids = liveSplitIds.get(Number(baseId)) || [];
+  for (const id of ids) {
+    sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: id });
+  }
+  liveSplitIds.delete(Number(baseId));
+}
+
+function emitPartialSpeakerSegments(data) {
+  const groups = splitFinalBySpeaker(data);
+  if (!groups) {
+    clearLiveSplit(data.utteranceId);
+    return false;
+  }
+
+  sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: Number(data.utteranceId) });
+
+  const oldIds = new Set(liveSplitIds.get(Number(data.utteranceId)) || []);
+  const newIds = [];
+
+  groups.forEach((group, index) => {
+    const id = liveSegmentId(data.utteranceId, index);
+    newIds.push(id);
+    oldIds.delete(id);
+    sendOverlay('LT_UTTERANCE', {
+      utteranceId: id,
+      original: group.text,
+      final: false,
+      speaker: group.speaker,
+      translationPending: false,
+      startMs: group.startMs,
+      endMs: group.endMs
+    });
+  });
+
+  for (const staleId of oldIds) {
+    sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: staleId });
+  }
+
+  liveSplitIds.set(Number(data.utteranceId), newIds);
+  return true;
+}
+
 async function emitFinalSpeakerSegments(data) {
   const groups = splitFinalBySpeaker(data);
+  clearLiveSplit(data.utteranceId);
   if (!groups) return false;
 
   sendOverlay('LT_UTTERANCE_REMOVE', { utteranceId: Number(data.utteranceId) });
@@ -851,6 +900,7 @@ async function stopAll({ announce = true } = {}) {
   utteranceTranslationSeq = new Map();
   finalTranslationCache = new Map();
   lockedUtteranceSpeakers = new Map();
+  liveSplitIds = new Map();
   speakerProfiles = new Map();
   finalizedConversation = [];
   clearTimeout(speakerInferenceTimer);
