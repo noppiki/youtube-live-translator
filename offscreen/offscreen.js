@@ -17,6 +17,7 @@ let speakerTimeline = [];
 let recentUtterances = new Map();
 let utteranceTranslationSeq = new Map();
 let finalTranslationCache = new Map();
+let lockedUtteranceSpeakers = new Map();
 let speakerProfiles = new Map();
 let speakerInferenceSession = null;
 let speakerInferenceBusy = false;
@@ -141,13 +142,82 @@ async function translateText(text, sourceLanguage) {
   return translator ? translator.translate(text) : text;
 }
 
+function cleanTokenText(tokens) {
+  return String((tokens || []).join(''))
+    .replace(/▁/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function speakerAtTime(ms) {
+  if (!Number.isFinite(ms)) return null;
+  let speaker = null;
+  for (const point of speakerTimeline) {
+    if (point.changeAtMs <= ms) speaker = point.speaker;
+    else break;
+  }
+  return speaker;
+}
+
+function splitFinalBySpeaker(data) {
+  const tokens = Array.isArray(data.tokenStrings) ? data.tokenStrings : [];
+  const times = Array.isArray(data.tokenTimestampsMs) ? data.tokenTimestampsMs : [];
+  if (!tokens.length || tokens.length !== times.length || !speakerTimeline.length) return null;
+
+  const groups = [];
+  let current = null;
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const speaker = speakerAtTime(times[i]);
+    if (!current || current.speaker !== speaker) {
+      current = { speaker, tokens: [], times: [] };
+      groups.push(current);
+    }
+    current.tokens.push(tokens[i]);
+    current.times.push(times[i]);
+  }
+
+  const useful = groups
+    .map((group) => ({
+      speaker: group.speaker,
+      text: cleanTokenText(group.tokens),
+      startMs: group.times[0],
+      endMs: group.times[group.times.length - 1]
+    }))
+    .filter((group) => group.text);
+
+  return useful.length > 1 ? useful : null;
+}
+
+async function emitFinalSpeakerSegments(data) {
+  const groups = splitFinalBySpeaker(data);
+  if (!groups) return false;
+
+  for (let i = 0; i < groups.length; i += 1) {
+    const group = groups[i];
+    const segmentId = Number(data.utteranceId) * 100 + i + 1;
+    lockedUtteranceSpeakers.set(segmentId, group.speaker);
+    await emitUtterance({
+      utteranceId: segmentId,
+      text: group.text,
+      sourceLanguage: data.language || settings.sourceLanguage,
+      final: true,
+      startMs: group.startMs,
+      endMs: group.endMs,
+      forcedSpeaker: group.speaker
+    });
+  }
+  return true;
+}
+
 async function emitUtterance({
   utteranceId,
   text,
   sourceLanguage,
   final,
   startMs = null,
-  endMs = null
+  endMs = null,
+  forcedSpeaker = null
 }) {
   const displayText = recentTranscript(text);
   if (!displayText) return;
@@ -168,7 +238,9 @@ async function emitUtterance({
     }
   }
 
-  const speaker = speakerForUtterance(id);
+  const speaker = Number.isInteger(forcedSpeaker)
+    ? forcedSpeaker
+    : (final ? (lockedUtteranceSpeakers.get(id) ?? speakerForUtterance(id)) : null);
 
   // Partial ASR updates are intentionally NOT translated.
   // This keeps the original transcript live while preventing the translated
@@ -228,7 +300,10 @@ async function emitUtterance({
       finalTranslationCache.delete(oldest);
     }
 
-    const resolvedSpeaker = speakerForUtterance(id);
+    const resolvedSpeaker = Number.isInteger(forcedSpeaker)
+      ? forcedSpeaker
+      : (lockedUtteranceSpeakers.get(id) ?? speakerForUtterance(id));
+    if (Number.isInteger(resolvedSpeaker)) lockedUtteranceSpeakers.set(id, resolvedSpeaker);
     sendOverlay('LT_UTTERANCE', {
       utteranceId: id,
       original: displayText,
@@ -291,15 +366,17 @@ function addSpeakerPoint(speaker, changeAtMs) {
   }
 
   for (const utteranceId of recentUtterances.keys()) {
+    const stored = recentUtterances.get(utteranceId);
+    if (!stored?.final || lockedUtteranceSpeakers.has(utteranceId)) continue;
     const resolved = speakerForUtterance(utteranceId);
     if (Number.isInteger(resolved)) {
+      lockedUtteranceSpeakers.set(utteranceId, resolved);
       sendOverlay('LT_UTTERANCE_SPEAKER', {
         utteranceId,
         speaker: resolved
       });
 
-      const stored = recentUtterances.get(utteranceId);
-      if (stored?.final && stored.text) {
+      if (stored?.text) {
         rememberFinalUtterance({
           utteranceId,
           text: stored.text,
@@ -635,14 +712,28 @@ function openLocalSocket() {
         return;
       }
       if (data.type === 'utterance') {
-        emitUtterance({
-          utteranceId: data.utteranceId,
-          text: data.text || '',
-          sourceLanguage: data.language || settings.sourceLanguage,
-          final: Boolean(data.final),
-          startMs: data.startMs,
-          endMs: data.endMs
-        });
+        if (data.final && Array.isArray(data.tokenStrings) && Array.isArray(data.tokenTimestampsMs)) {
+          const split = await emitFinalSpeakerSegments(data);
+          if (!split) {
+            emitUtterance({
+              utteranceId: data.utteranceId,
+              text: data.text || '',
+              sourceLanguage: data.language || settings.sourceLanguage,
+              final: true,
+              startMs: data.startMs,
+              endMs: data.endMs
+            });
+          }
+        } else {
+          emitUtterance({
+            utteranceId: data.utteranceId,
+            text: data.text || '',
+            sourceLanguage: data.language || settings.sourceLanguage,
+            final: Boolean(data.final),
+            startMs: data.startMs,
+            endMs: data.endMs
+          });
+        }
       } else if (data.type === 'partial' || data.type === 'final') {
         emitUtterance({
           text: data.text || data.stableText || '',
@@ -754,6 +845,7 @@ async function stopAll({ announce = true } = {}) {
   recentUtterances = new Map();
   utteranceTranslationSeq = new Map();
   finalTranslationCache = new Map();
+  lockedUtteranceSpeakers = new Map();
   speakerProfiles = new Map();
   finalizedConversation = [];
   clearTimeout(speakerInferenceTimer);
