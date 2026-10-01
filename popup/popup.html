@@ -9,7 +9,7 @@
 <body>
   <main>
     <h1>Live Translator</h1>
-    <p class="lead">YouTube LiveをローカルAIで文字起こしし、英→日はGemma 4 E4Bで文脈翻訳、その他はChrome内蔵翻訳で字幕化します。</p>
+    <p class="lead">YouTube LiveをローカルAIで文字起こしし、英・韓・中・西・仏・独→日はGemma 4 E4Bで文脈翻訳、その他はChrome内蔵翻訳で字幕化します。</p>
 
     <label>
       音声認識
@@ -43,7 +43,7 @@
         </select>
       </label>
 
-      <p class="hint" id="translationModelHint"><strong>翻訳モデル:</strong> Gemma 4 E4B IT（英語 → 日本語・文脈翻訳）</p>
+      <p class="hint" id="translationModelHint"><strong>翻訳モデル:</strong> Gemma 4 E4B IT（英・韓・中・西・仏・独 → 日本語）</p>
 
       <label class="checkLabel" id="diarizationLabel">
         <input id="diarization" type="checkbox">
@@ -118,7 +118,7 @@
       固有名詞・専門用語
       <textarea id="domainTerms" rows="3" placeholder="OpenAI&#10;Anthropic&#10;Claude&#10;Cursor"></textarea>
     </label>
-    <p class="hint" id="domainTermsHint">英→日はGemma 4 E4Bの翻訳用語集として利用します。Qwen3-ASR使用時は音声認識contextにも反映します。</p>
+    <p class="hint" id="domainTermsHint">Gemma 4 E4Bの翻訳用語集として利用します。Qwen3-ASR使用時は音声認識contextにも反映します。</p>
 
     <label id="endpointingLabel">
       Deepgram区切り
