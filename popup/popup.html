@@ -23,7 +23,7 @@
     <section class="card" id="localCard">
       <div class="cardTitle">
         <span>ローカルエンジン</span>
-        <span id="localBadge" class="badge offline">未接続</span>
+        <span id="localBadge" class="badge offline">確認中</span>
       </div>
 
       <label>
@@ -34,15 +34,16 @@
         </select>
       </label>
 
-      <div class="row">
+      <div class="localActions">
+        <button id="startLocal" class="secondary">ローカル起動</button>
         <button id="testLocal">接続テスト</button>
         <button id="installModel">モデル準備</button>
       </div>
 
       <details>
-        <summary>初回インストール</summary>
-        <p class="hint">Apple Silicon Mac用。下のコマンドをターミナルへ1回貼り付けるだけです。以後は自動起動します。</p>
-        <textarea id="installCommand" readonly rows="3">curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash</textarea>
+        <summary>初回インストール / 起動ヘルパー更新</summary>
+        <p class="hint">Apple Silicon Mac用。Qwen3導入済みでも、拡張から起動する機能を追加するには一度この最新版を実行してください。</p>
+        <textarea id="installCommand" readonly rows="3"></textarea>
         <button id="copyInstall">コマンドをコピー</button>
       </details>
     </section>
@@ -76,6 +77,12 @@
         </select>
       </label>
     </div>
+
+    <label class="rangeLabel">
+      <span>翻訳字幕サイズ <output id="translationSizeValue">100%</output></span>
+      <input id="translationSize" type="range" min="70" max="180" step="10" value="100">
+    </label>
+    <p class="hint">70〜180%。変更は開いているYouTubeへ即時反映されます。</p>
 
     <label>
       固有名詞・専門用語
