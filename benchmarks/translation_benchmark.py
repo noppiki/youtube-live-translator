@@ -93,10 +93,12 @@ def run_one(model, tokenizer, model_kind, case, max_tokens):
             first = time.perf_counter()
         if text:
             chunks.append(text)
+            if "<end_of_turn>" in text:
+                break
         token_count += 1
 
     ended = time.perf_counter()
-    output = "".join(chunks).strip()
+    output = "".join(chunks).split("<end_of_turn>", 1)[0].strip()
     ttft_ms = ((first or ended) - started) * 1000
     total_ms = (ended - started) * 1000
     gen_seconds = max((ended - (first or ended)), 1e-9)
