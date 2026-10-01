@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax
+        run: |
+          node --check background/service-worker.js
+          node --check popup/popup.js
+          node --check offscreen/offscreen.js
+          node --check content/content.js
+      - name: Python syntax
+        run: |
+          python3 -m py_compile local-server/server.py native-host/launcher.py
+      - name: Shell syntax
+        run: |
+          bash -n scripts/install-macos.sh
+          bash -n scripts/uninstall-macos.sh
+      - name: Manifest JSON
+        run: |
+          python3 -m json.tool manifest.json >/dev/null
+
+  fluid-bridge:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build FluidAudio bridge
+        run: swift build -c release --package-path fluid-bridge
