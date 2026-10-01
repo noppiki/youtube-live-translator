@@ -1,11 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+EXTENSION_ID="${1:-}"
 APP_DIR="$HOME/Library/Application Support/YouTubeLiveTranslator"
 VENV="$APP_DIR/.venv"
 SERVER="$APP_DIR/server.py"
 PLIST="$HOME/Library/LaunchAgents/com.noppiki.youtube-live-translator.plist"
 LOG_DIR="$APP_DIR/logs"
+NATIVE_DIR="$APP_DIR/native"
+NATIVE_SCRIPT="$NATIVE_DIR/launcher.py"
+NATIVE_WRAPPER="$NATIVE_DIR/host"
+NATIVE_HOST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+NATIVE_MANIFEST="$NATIVE_HOST_DIR/com.noppiki.youtube_live_translator.json"
 RAW_BASE="https://raw.githubusercontent.com/noppiki/youtube-live-translator/main"
 
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
@@ -14,7 +20,7 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
 fi
 
 echo "▶ YouTube Live Translator local engine"
-mkdir -p "$APP_DIR" "$LOG_DIR" "$HOME/Library/LaunchAgents"
+mkdir -p "$APP_DIR" "$LOG_DIR" "$NATIVE_DIR" "$HOME/Library/LaunchAgents"
 
 if ! command -v uv >/dev/null 2>&1; then
   if command -v brew >/dev/null 2>&1; then
@@ -27,7 +33,7 @@ if ! command -v uv >/dev/null 2>&1; then
   fi
 fi
 
-echo "▶ Creating isolated Python environment..."
+echo "▶ Creating/updating isolated Python environment..."
 uv venv --python 3.12 "$VENV"
 uv pip install --python "$VENV/bin/python" "mlx-qwen3-asr>=0.4.3" "aiohttp>=3.10" "numpy>=2.0"
 
@@ -54,9 +60,9 @@ cat > "$PLIST" <<EOF
     <string>$SERVER</string>
   </array>
   <key>RunAtLoad</key>
-  <true/>
+  <false/>
   <key>KeepAlive</key>
-  <true/>
+  <false/>
   <key>StandardOutPath</key>
   <string>$LOG_DIR/server.log</string>
   <key>StandardErrorPath</key>
@@ -65,14 +71,42 @@ cat > "$PLIST" <<EOF
 </plist>
 EOF
 
-echo "▶ Registering background service..."
+echo "▶ Registering local engine service..."
 launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-launchctl kickstart -k "gui/$(id -u)/com.noppiki.youtube-live-translator"
+
+echo "▶ Installing Chrome Native Messaging launcher..."
+curl -fsSL "$RAW_BASE/native-host/launcher.py" -o "$NATIVE_SCRIPT"
+
+cat > "$NATIVE_WRAPPER" <<EOF
+#!/bin/bash
+exec "$VENV/bin/python" "$NATIVE_SCRIPT"
+EOF
+chmod +x "$NATIVE_WRAPPER"
+
+if [[ -n "$EXTENSION_ID" ]]; then
+  mkdir -p "$NATIVE_HOST_DIR"
+  cat > "$NATIVE_MANIFEST" <<EOF
+{
+  "name": "com.noppiki.youtube_live_translator",
+  "description": "Start the local Qwen3-ASR service for YouTube Live Translator",
+  "path": "$NATIVE_WRAPPER",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://$EXTENSION_ID/"
+  ]
+}
+EOF
+  echo "✓ One-click launcher registered for extension: $EXTENSION_ID"
+else
+  echo "⚠ Extension ID was not supplied."
+  echo "  Local STT is installed, but the Chrome one-click start button will not work."
+  echo "  Re-run this installer from the command shown inside the extension popup."
+fi
 
 echo
-echo "✓ Installed."
-echo "  Local API: http://127.0.0.1:8765"
+echo "✓ Installed/updated."
+echo "  Local API (when started): http://127.0.0.1:8765"
 echo "  Logs: $LOG_DIR"
 echo
-echo "Return to the extension and press '接続テスト'."
+echo "Open the extension and press 'ローカル起動'."
