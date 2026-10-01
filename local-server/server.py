@@ -385,7 +385,11 @@ async def stream(request: web.Request):
         elif requested == "qwen":
             backend = "qwen"
         else:
-            backend = "fluid" if _is_english(language) and FLUID_BRIDGE.exists() else "qwen"
+            backend = (
+                "fluid"
+                if want_diarization and _is_english(language) and FLUID_BRIDGE.exists()
+                else "qwen"
+            )
 
         if backend == "fluid":
             if not _is_english(language):
