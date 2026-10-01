@@ -13,8 +13,16 @@ MODELS = {
         "id": "Qwen/Qwen3-4B-MLX-4bit",
         "kind": "context_llm",
     },
-    "gemma": {
+    "gemma3": {
         "id": "mlx-community/gemma-3-text-4b-it-4bit",
+        "kind": "context_llm",
+    },
+    "gemma4e4b": {
+        "id": "Siarhei/gemma-4-E4B-4bit",
+        "kind": "context_llm",
+    },
+    "gemma4-12b": {
+        "id": "DreamFoundries/gemma-4-12B-it-4bit",
         "kind": "context_llm",
     },
     "translategemma": {
@@ -45,12 +53,19 @@ CURRENT:
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
     ]
-    return tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        enable_thinking=False,
-    )
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+    except TypeError:
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
 
 def build_translate_gemma_prompt(tokenizer, case):
     # TranslateGemma's official template expects exactly one translation item.
@@ -113,7 +128,7 @@ def run_one(model, tokenizer, model_kind, case, max_tokens):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--models", default="qwen,gemma,translategemma")
+    parser.add_argument("--models", default="gemma3,gemma4e4b,gemma4-12b,qwen")
     parser.add_argument("--cases", default=str(Path(__file__).with_name("translation_cases.json")))
     parser.add_argument("--output", default="translation-benchmark-results.json")
     parser.add_argument("--csv", default="translation-benchmark-results.csv")
