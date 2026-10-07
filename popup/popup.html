@@ -43,7 +43,13 @@
         </select>
       </label>
 
-      <p class="hint" id="translationModelHint"><strong>翻訳モデル:</strong> Gemma 4 E4B IT（英・韓・中・西・仏・独 → 日本語）</p>
+      <label id="translationModelLabel">
+        翻訳モデル
+        <select id="translationModel" disabled>
+          <option value="DreamFoundries/gemma-4-E4B-it-4bit">Gemma 4 E4B IT 4-bit（MLX・固定）</option>
+        </select>
+      </label>
+      <p class="hint" id="translationModelHint">英・韓・中・西・仏・独 → 日本語の文脈翻訳に使用します。</p>
 
       <label class="checkLabel" id="diarizationLabel">
         <input id="diarization" type="checkbox">
@@ -66,7 +72,7 @@
 
       <details>
         <summary>初回インストール / ローカルAI更新</summary>
-        <p class="hint">Apple Silicon Mac用。FluidAudioに加えてGemma 4 E4B 4B翻訳モデルも準備します。既存ユーザーも一度再実行してください。</p>
+        <p class="hint" id="installHint">OSに合わせたローカルAI環境を準備します。表示されたコマンドを実行してください。</p>
         <textarea id="installCommand" readonly rows="3"></textarea>
         <button id="copyInstall">コマンドをコピー</button>
       </details>

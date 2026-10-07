@@ -8,46 +8,29 @@ from pathlib import Path
 
 import numpy as np
 from aiohttp import web
-from mlx_qwen3_asr import Session
-from mlx_lm import load as mlx_load, stream_generate
-from mlx_lm.sample_utils import make_sampler
+
+from backends import (
+    app_dir,
+    create_asr_backend,
+    create_translation_backend,
+    runtime_metadata,
+)
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("YTLT_PORT", "8765"))
-APP_DIR = Path.home() / "Library/Application Support/YouTubeLiveTranslator"
+APP_DIR = app_dir()
 FLUID_BRIDGE = Path(os.environ.get("YTLT_FLUID_BRIDGE", APP_DIR / "bin/fluid-bridge"))
-DEFAULT_MODEL = os.environ.get("YTLT_MODEL", "moona3k/mlx-qwen3-asr-0.6b-4bit")
+RUNTIME = runtime_metadata(fluid_bridge=FLUID_BRIDGE)
 TRANSLATION_MODEL = os.environ.get(
     "YTLT_TRANSLATION_MODEL",
-    "DreamFoundries/gemma-4-E4B-it-4bit",
+    "DreamFoundries/gemma-4-E4B-it-4bit"
+    if RUNTIME.translation_backend == "mlx"
+    else "gemma-4-E4B-it-qat-q4_0",
 )
-
-MODELS = {
-    "balanced": {
-        "id": "moona3k/mlx-qwen3-asr-0.6b-4bit",
-        "label": "Qwen3-ASR 0.6B 4-bit",
-    },
-    "accuracy": {
-        "id": "moona3k/mlx-qwen3-asr-1.7b-4bit",
-        "label": "Qwen3-ASR 1.7B 4-bit",
-    },
-}
-_sessions = {}
-_session_lock = asyncio.Lock()
-_translation_model = None
-_translation_tokenizer = None
-_translation_lock = asyncio.Lock()
-_translation_inference_lock = asyncio.Lock()
-
-TRANSLATION_SYSTEM = """You translate live-stream captions into concise, natural Japanese subtitles.
-Use recent dialogue only as context. Translate CURRENT only.
-Output Japanese only. Do not leave Korean, Chinese, Spanish, French, German, or other source-language words in the output unless they are proper names, product names, model names, acronyms, or glossary-preserved terms.
-Preserve person names, product names, model names, acronyms, and technical terms in Latin script unless the glossary explicitly specifies a Japanese form.
-Follow the glossary exactly.
-Do not explain or add notes.
-Prefer natural spoken Japanese over literal wording.
-Never drop meaning, negation, numbers, measurement units, or currency units.
-If a number has a unit in the source, keep the unit in Japanese in the translation."""
+ASR_BACKEND = create_asr_backend(RUNTIME)
+TRANSLATION_BACKEND = create_translation_backend(RUNTIME, TRANSLATION_MODEL)
+MODELS = ASR_BACKEND.models
+DEFAULT_MODEL = os.environ.get("YTLT_MODEL", MODELS["balanced"]["id"])
 
 
 def _allowed_origin(request: web.Request) -> bool:
@@ -62,76 +45,10 @@ def _is_english(language) -> bool:
     return value in {"en", "english", "en-us", "en-gb"}
 
 
-async def get_session(model_id: str) -> Session:
-    async with _session_lock:
-        session = _sessions.get(model_id)
-        if session is None:
-            session = await asyncio.to_thread(Session, model=model_id)
-            _sessions[model_id] = session
-        return session
+async def get_session(model_id: str):
+    """Load an ASR model through the selected platform adapter."""
 
-
-
-async def get_translation_model():
-    global _translation_model, _translation_tokenizer
-    async with _translation_lock:
-        if _translation_model is None or _translation_tokenizer is None:
-            _translation_model, _translation_tokenizer = await asyncio.to_thread(
-                mlx_load, TRANSLATION_MODEL
-            )
-        return _translation_model, _translation_tokenizer
-
-
-def _translate_sync(model, tokenizer, text: str, context, glossary, source: str, target: str) -> str:
-    recent = "\n".join(str(x) for x in (context or [])[-3:]) or "(none)"
-    glossary_text = "\n".join(f"- {x}" for x in (glossary or [])) or "(none)"
-    user = f"""SOURCE LANGUAGE: {source}
-TARGET LANGUAGE: {target}
-
-RECENT CONTEXT:
-{recent}
-
-GLOSSARY:
-{glossary_text}
-
-CURRENT:
-{text}"""
-    messages = [
-        {"role": "system", "content": TRANSLATION_SYSTEM},
-        {"role": "user", "content": user},
-    ]
-    try:
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=False,
-        )
-    except TypeError:
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-
-    chunks = []
-    for response in stream_generate(
-        model,
-        tokenizer,
-        prompt=prompt,
-        max_tokens=96,
-        sampler=make_sampler(temp=0.0),
-    ):
-        piece = getattr(response, "text", "")
-        if piece:
-            chunks.append(piece)
-
-    result = "".join(chunks).strip()
-    for prefix in ("A:", "B:", "C:", "D:"):
-        if result.startswith(prefix):
-            result = result[len(prefix):].strip()
-            break
-    return result
+    return await ASR_BACKEND.get_session(model_id)
 
 
 async def translate(request: web.Request):
@@ -149,18 +66,13 @@ async def translate(request: web.Request):
     if source not in supported_sources or target != "ja":
         raise web.HTTPBadRequest(text="Local smart translation supports English/Korean/Chinese/Spanish/French/German → Japanese.")
 
-    model, tokenizer = await get_translation_model()
-    async with _translation_inference_lock:
-        translated = await asyncio.to_thread(
-            _translate_sync,
-            model,
-            tokenizer,
-            text,
-            data.get("context") or [],
-            data.get("glossary") or [],
-            source,
-            target,
-        )
+    translated = await TRANSLATION_BACKEND.translate(
+        text,
+        data.get("context") or [],
+        data.get("glossary") or [],
+        source,
+        target,
+    )
     return web.json_response({
         "ok": True,
         "translated": translated,
@@ -182,8 +94,8 @@ class FluidProcess:
         return struct.pack("<I", len(body)) + body
 
     async def start(self, timeout=600):
-        if not FLUID_BRIDGE.exists():
-            raise RuntimeError("FluidAudio bridge is not installed. Re-run the macOS installer.")
+        if not RUNTIME.diarization_available:
+            raise RuntimeError("FluidAudio is available on macOS only in this release.")
 
         self.proc = await asyncio.create_subprocess_exec(
             str(FLUID_BRIDGE),
@@ -266,29 +178,36 @@ class FluidProcess:
                 task.cancel()
 
 
+def build_health_payload() -> dict[str, object]:
+    """Build the health payload without performing model inference."""
+
+    return {
+        "ok": True,
+        "service": "youtube-live-translator-local",
+        "version": "0.5.9",
+        "platform": platform.machine(),
+        "defaultModel": DEFAULT_MODEL,
+        "loadedModels": ASR_BACKEND.loaded_models,
+        "models": MODELS,
+        **RUNTIME.as_dict(),
+        "translation": {
+            "model": TRANSLATION_MODEL,
+            "loaded": TRANSLATION_BACKEND.loaded,
+            "backend": RUNTIME.translation_backend,
+            "endpoint": getattr(TRANSLATION_BACKEND, "url", None),
+            "toJapanese": ["en", "ko", "zh", "es", "fr", "de"],
+        },
+        "fluidAudio": {
+            "available": RUNTIME.diarization_available,
+            "path": str(FLUID_BRIDGE),
+            "englishStreaming": RUNTIME.os == "macos",
+            "diarization": RUNTIME.diarization_available,
+        },
+    }
+
+
 async def health(request: web.Request):
-    return web.json_response(
-        {
-            "ok": True,
-            "service": "youtube-live-translator-local",
-            "version": "0.4.0",
-            "platform": platform.machine(),
-            "defaultModel": DEFAULT_MODEL,
-            "loadedModels": list(_sessions.keys()),
-            "models": MODELS,
-            "translation": {
-                "model": TRANSLATION_MODEL,
-                "loaded": _translation_model is not None,
-                "toJapanese": ["en", "ko", "zh", "es", "fr", "de"],
-            },
-            "fluidAudio": {
-                "available": FLUID_BRIDGE.exists(),
-                "path": str(FLUID_BRIDGE),
-                "englishStreaming": True,
-                "diarization": FLUID_BRIDGE.exists(),
-            },
-        }
-    )
+    return web.json_response(build_health_payload())
 
 
 async def models(request: web.Request):
@@ -296,11 +215,12 @@ async def models(request: web.Request):
         {
             "ok": True,
             "models": MODELS,
-            "loaded": list(_sessions),
+            "loaded": ASR_BACKEND.loaded_models,
+            **RUNTIME.as_dict(),
             "fluidAudio": {
-                "available": FLUID_BRIDGE.exists(),
-                "asr": "Parakeet EOU 120M / 320 ms",
-                "diarization": "Sortformer",
+                "available": RUNTIME.diarization_available,
+                "asr": "Parakeet EOU 120M / 320 ms" if RUNTIME.os == "macos" else None,
+                "diarization": "Sortformer" if RUNTIME.diarization_available else None,
             },
         }
     )
@@ -314,8 +234,8 @@ async def install_model(request: web.Request):
     engine = data.get("engine", "qwen")
 
     if engine == "fluid":
-        if not FLUID_BRIDGE.exists():
-            raise web.HTTPBadRequest(text="FluidAudio bridge is not installed")
+        if not RUNTIME.diarization_available:
+            raise web.HTTPBadRequest(text="FluidAudio is available on macOS only")
         fluid = FluidProcess(diarization=bool(data.get("diarization", False)))
         try:
             await fluid.start(timeout=900)
@@ -387,11 +307,13 @@ async def stream(request: web.Request):
         else:
             backend = (
                 "fluid"
-                if want_diarization and _is_english(language) and FLUID_BRIDGE.exists()
+                if want_diarization and _is_english(language) and RUNTIME.diarization_available
                 else "qwen"
             )
 
         if backend == "fluid":
+            if not RUNTIME.diarization_available:
+                raise ValueError("FluidAudio live ASR is available on macOS only.")
             if not _is_english(language):
                 raise ValueError("FluidAudio live ASR is currently enabled for English only.")
             await ws.send_json({
@@ -439,7 +361,9 @@ async def stream(request: web.Request):
                 "model": model_id,
                 "language": language or "auto",
                 "diarization": False,
-                "warning": "Speaker diarization requires the FluidAudio English backend."
+                "warning": "Speaker diarization is currently unavailable on Windows."
+                if want_diarization and RUNTIME.os == "windows"
+                else "Speaker diarization requires the FluidAudio English backend."
                 if want_diarization
                 else None,
             }

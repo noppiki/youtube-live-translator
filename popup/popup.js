@@ -1,10 +1,34 @@
 const $ = (s) => document.querySelector(s);
 const NATIVE_HOST = 'com.noppiki.youtube_live_translator';
+let PLATFORM_OS = 'unknown';
+let IS_WINDOWS = false;
+
+async function detectPlatform() {
+  try {
+    const info = await chrome.runtime.getPlatformInfo();
+    PLATFORM_OS = String(info?.os || 'unknown').toLowerCase();
+    IS_WINDOWS = PLATFORM_OS === 'win';
+    return;
+  } catch {
+    // Fallback for older Chromium builds or unusual extension environments.
+  }
+
+  const fallback = String(
+    globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform || ''
+  ).toLowerCase();
+  PLATFORM_OS = fallback;
+  IS_WINDOWS = fallback.includes('win');
+}
+const WINDOWS_MODELS = [
+  { value: 'Qwen/Qwen3-ASR-0.6B-hf', label: 'Qwen3-ASR 0.6B（Windows Transformers・推奨）' },
+  { value: 'Qwen/Qwen3-ASR-1.7B-hf', label: 'Qwen3-ASR 1.7B（Windows Transformers・高精度）' }
+];
 
 const engineMode = $('#engineMode');
 const localBackend = $('#localBackend');
 const localModel = $('#localModel');
 const qwenModelLabel = $('#qwenModelLabel');
+const translationModel = $('#translationModel');
 const localBadge = $('#localBadge');
 const startLocal = $('#startLocal');
 const testLocal = $('#testLocal');
@@ -68,6 +92,7 @@ async function nativeStatus() {
 }
 
 function effectiveLocalBackend() {
+  if (IS_WINDOWS) return 'qwen';
   if (localBackend.value === 'fluid') return 'fluid';
   if (localBackend.value === 'qwen') return 'qwen';
   return sourceLanguage.value === 'en' && diarization.checked ? 'fluid' : 'qwen';
@@ -83,16 +108,23 @@ async function checkLocal(showStatus = false) {
     if (!data?.ok) throw new Error('not ready');
 
     const fluidReady = Boolean(data.fluidAudio?.available);
-    localBadge.textContent = fluidReady
-      ? '接続済み · FluidAudio + Gemma 4 E4B'
-      : '接続済み · Qwen3-ASR + Gemma 4 E4B';
+    if (IS_WINDOWS || data.os === 'windows') {
+      const accelerator = data.accelerator ? ` · ${data.accelerator}` : '';
+      localBadge.textContent = `接続済み · Qwen3-ASR Transformers + llama.cpp${accelerator}`;
+    } else {
+      localBadge.textContent = fluidReady
+        ? '接続済み · FluidAudio + Gemma 4 E4B'
+        : '接続済み · Qwen3-ASR + Gemma 4 E4B';
+    }
     localBadge.className = 'badge online';
     startLocal.disabled = true;
     startLocal.textContent = '起動済み';
     if (showStatus) {
-      status.textContent = fluidReady
-        ? '接続済み。自動音声認識: Qwen3-ASR優先（話者分離ON時のみFluidAudio）、翻訳: Gemma 4 E4B。'
-        : '接続済み。音声認識: Qwen3-ASR、翻訳: Gemma 4 E4B。';
+      status.textContent = IS_WINDOWS || data.os === 'windows'
+        ? `接続済み。音声認識: Qwen3-ASR Transformers、翻訳: llama.cpp / Gemma 4 E4B${data.accelerator ? `（${data.accelerator}）` : ''}。`
+        : fluidReady
+          ? '接続済み。自動音声認識: Qwen3-ASR優先（話者分離ON時のみFluidAudio）、翻訳: Gemma 4 E4B。'
+          : '接続済み。音声認識: Qwen3-ASR、翻訳: Gemma 4 E4B。';
     }
     return data;
   } catch {
@@ -120,9 +152,9 @@ async function checkLocal(showStatus = false) {
 function updateVisibility() {
   const mode = engineMode.value;
   const backend = effectiveLocalBackend();
-  const fluid = backend === 'fluid';
+  const fluid = !IS_WINDOWS && backend === 'fluid';
   const english = sourceLanguage.value === 'en';
-  const canUseFluidDiarization =
+  const canUseFluidDiarization = !IS_WINDOWS &&
     english && (localBackend.value === 'fluid' || localBackend.value === 'auto');
 
   apiKeyLabel.style.display = mode === 'local' ? 'none' : 'grid';
@@ -133,7 +165,11 @@ function updateVisibility() {
   domainTermsHint.style.display = 'block';
 
   diarization.disabled = !canUseFluidDiarization;
-  if (!canUseFluidDiarization) {
+  if (IS_WINDOWS) {
+    diarization.checked = false;
+    diarization.disabled = true;
+    diarizationHint.textContent = 'Windows初版では話者分離（FluidAudio / Sortformer）は準備中です。';
+  } else if (!canUseFluidDiarization) {
     diarizationHint.textContent = english
       ? '話者分離を使うにはローカルバックエンドをFluidAudioまたは自動にしてください。'
       : '現在のライブ話者分離は英語＋FluidAudio時のみ利用できます。';
@@ -145,24 +181,56 @@ function updateVisibility() {
     diarizationHint.textContent = 'Sortformerで話者A/B…を推定します。判定は字幕より少し遅れて追従します。';
   }
 
-  const canInferNames = fluid && english && diarization.checked;
+  const canInferNames = !IS_WINDOWS && fluid && english && diarization.checked;
   speakerNameInference.disabled = !canInferNames;
   prepareSpeakerAI.disabled = !canInferNames || !speakerNameInference.checked;
   speakerNameInferenceHint.textContent = canInferNames
     ? '会話・配信タイトル・チャンネル名・概要欄から推定します。確信度が低い場合は「名前?」または役割名で表示します。'
     : '話者名推定は、英語＋FluidAudio＋話者分離ONのとき利用できます。';
 
-  installModel.textContent = fluid
+  installModel.textContent = IS_WINDOWS
+    ? 'Qwen3-ASRモデル準備'
+    : fluid
     ? (diarization.checked ? '音声認識＋話者モデル準備' : '音声認識モデル準備')
     : 'Qwen3-ASRモデル準備';
 }
 
 function updateInstallCommand() {
-  installCommand.value =
-    `curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash -s -- ${chrome.runtime.id}`;
+  installCommand.value = IS_WINDOWS
+    ? `& ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-windows.ps1'))) -ExtensionId '${chrome.runtime.id}'`
+    : `curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash -s -- ${chrome.runtime.id}`;
+}
+
+function configurePlatformUI() {
+  if (!IS_WINDOWS) return;
+
+  const fluidOption = localBackend.querySelector('option[value="fluid"]');
+  if (fluidOption) {
+    fluidOption.hidden = true;
+    fluidOption.disabled = true;
+  }
+  if (localBackend.value === 'fluid') localBackend.value = 'qwen';
+
+  localModel.replaceChildren(...WINDOWS_MODELS.map(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    return option;
+  }));
+  if (!WINDOWS_MODELS.some(({ value }) => value === localModel.value)) {
+    localModel.value = WINDOWS_MODELS[0].value;
+  }
+  translationModel.replaceChildren(Object.assign(document.createElement('option'), {
+    value: 'google/gemma-4-E4B-it-qat-q4_0-gguf',
+    textContent: 'Gemma 4 E4B Q4_0（llama.cpp・固定）'
+  }));
+  translationModel.value = 'google/gemma-4-E4B-it-qat-q4_0-gguf';
+  $('#translationModelHint').textContent = '英・韓・中・西・仏・独 → 日本語。Windowsではllama.cpp経由でGemma 4 E4Bを使用します。';
+  $('#installHint').textContent = 'Windows 10/11 x64用（PowerShell）。Qwen3-ASR Transformers、llama.cpp、Gemma 4 E4B、Native Messaging、ログイン時起動を準備します。初回はモデルとランタイムのダウンロードがあります。';
 }
 
 async function load() {
+  await detectPlatform();
   const stored = await chrome.storage.local.get(DEFAULTS);
   engineMode.value = stored.engineMode;
   localBackend.value = stored.localBackend;
@@ -178,6 +246,7 @@ async function load() {
   domainTerms.value = stored.domainTerms || '';
   endpointingMs.value = String(stored.endpointingMs || 350);
 
+  configurePlatformUI();
   updateInstallCommand();
   updateVisibility();
   checkLocal(false);
