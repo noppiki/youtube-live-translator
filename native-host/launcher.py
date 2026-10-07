@@ -159,10 +159,14 @@ def ensure_started_windows() -> dict[str, object]:
         | getattr(subprocess, "DETACHED_PROCESS", 0)
         | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     )
+    log_dir = APP_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     try:
         translation_server = _windows_translation_server()
         translation_model = _windows_translation_model()
         if translation_server.is_file() and translation_model and not _port_is_open(8766):
+            llama_out = open(log_dir / "llama.log", "a", encoding="utf-8")
+            llama_err = open(log_dir / "llama.err.log", "a", encoding="utf-8")
             subprocess.Popen(
                 [
                     str(translation_server),
@@ -176,21 +180,30 @@ def ensure_started_windows() -> dict[str, object]:
                 cwd=str(translation_server.parent),
                 env=_windows_environment(),
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=llama_out,
+                stderr=llama_err,
                 creationflags=creation_flags,
                 close_fds=True,
             )
+            llama_out.close()
+            llama_err.close()
+
+        server_env = _windows_environment()
+        server_env["PYTHONFAULTHANDLER"] = "1"
+        server_out = open(log_dir / "server.log", "a", encoding="utf-8")
+        server_err = open(log_dir / "server.err.log", "a", encoding="utf-8")
         subprocess.Popen(
-            [str(python), str(_windows_server())],
+            [str(python), "-X", "faulthandler", "-u", str(_windows_server())],
             cwd=str(APP_DIR),
-            env=_windows_environment(),
+            env=server_env,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=server_out,
+            stderr=server_err,
             creationflags=creation_flags,
             close_fds=True,
         )
+        server_out.close()
+        server_err.close()
     except OSError as exc:
         return {"ok": False, "installed": True, "running": False, "error": str(exc)}
 
