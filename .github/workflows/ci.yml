@@ -19,7 +19,7 @@ jobs:
           node --check content/content.js
       - name: Python syntax
         run: |
-          python3 -m py_compile local-server/server.py native-host/launcher.py
+          python3 -m py_compile local-server/server.py local-server/backends/*.py native-host/launcher.py
       - name: Shell syntax
         run: |
           bash -n scripts/install-macos.sh
@@ -27,6 +27,42 @@ jobs:
       - name: Manifest JSON
         run: |
           python3 -m json.tool manifest.json >/dev/null
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install test dependencies
+        run: uv pip install --system -r requirements-test.txt
+      - name: Run model-free unit tests
+        env:
+          YTLT_ACCELERATOR: cpu
+        run: python -m pytest -q
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install test dependencies
+        shell: pwsh
+        run: uv pip install --system -r requirements-test.txt
+      - name: Run model-free unit tests
+        shell: pwsh
+        env:
+          YTLT_ACCELERATOR: cpu
+        run: python -m pytest -q
+      - name: Validate Windows installer dry run
+        shell: pwsh
+        run: |
+          ./scripts/install-windows.ps1 -DryRun -SkipModels -SkipRuntime -NoStart -ExtensionId aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
   fluid-bridge:
     runs-on: macos-15

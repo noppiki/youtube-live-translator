@@ -263,6 +263,26 @@ curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/mai
 
 FluidAudioモデルはFluidAudio標準のモデルキャッシュへ保存されます。
 
+## Windows 10/11 x64 のローカルAI導入
+
+拡張機能をChromeへ読み込んだ後、ポップアップの **初回インストール / ローカルAI更新** に表示されるPowerShellコマンドを実行してください。コマンドには現在の拡張IDが検証済みの引数として含まれます。
+
+Windowsインストーラーは次をユーザー領域へ配置します。
+
+- `%LOCALAPPDATA%\YouTubeLiveTranslator\.venv` のPython 3.12環境
+- 公式Transformers版 `Qwen/Qwen3-ASR-0.6B-hf`（CUDA優先、CPU fallback）
+- llama.cppのWindows x64ランタイム（CUDA / Vulkan / CPU）
+- `google/gemma-4-E4B-it-qat-q4_0-gguf` のQ4_0翻訳モデル
+- Chrome / Edge Native Messaging登録とログイン時自動起動
+
+インストールの確認だけを行う場合は、チェックアウトしたリポジトリのPowerShellから以下を実行できます。モデル・ランタイムはダウンロードされません。
+
+```powershell
+.\scripts\install-windows.ps1 -DryRun -SkipModels -SkipRuntime -NoStart -ExtensionId YOUR_EXTENSION_ID
+```
+
+Windows初版ではFluidAudio / Sortformerによる話者分離は未対応です。`/health` は `os`、`asrBackend`、`translationBackend`、`accelerator`、`diarizationAvailable` を返し、拡張ポップアップにも実際のバックエンドとアクセラレーターを表示します。
+
 ## v0.3以前から更新する場合
 
 ```bash
@@ -353,6 +373,8 @@ curl http://127.0.0.1:8765/health
 
 FluidAudio bridgeが利用可能かも返します。
 
+OS差分は `os`、`asrBackend`、`translationBackend`、`accelerator`、`diarizationAvailable` で確認できます。Windowsではそれぞれ `windows`、`torch`、`llamacpp`、`cuda|vulkan|cpu`、`false` になります。
+
 ### Models
 
 ```bash
@@ -392,7 +414,7 @@ curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/mai
 - 話者判定は字幕より後追いになる
 - Qwen3経路では現在話者分離なし
 - 初回FluidAudioモデル準備にはモデルダウンロードが必要
-- 現在のローカルインストーラはApple Silicon Mac向け
+- Windows初版ではFluidAudio話者分離を利用できない
 
 ## 今後
 
@@ -404,7 +426,7 @@ curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/mai
 - 字幕位置・背景透明度
 - SRT / VTT出力
 - Twitch / X Live対応
-- Windows向けローカルエンジン
+- Windows向け話者分離バックエンド
 
 ## Third-party components
 
