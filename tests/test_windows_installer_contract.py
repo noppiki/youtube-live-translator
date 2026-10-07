@@ -38,3 +38,13 @@ def test_installer_prefers_cuda_pytorch_on_nvidia_windows():
     assert 'Install-PyTorch $Uv $Python' in INSTALLER
     dependency_block = INSTALLER.split('Write-Step "Creating/updating isolated Python 3.12 environment"', 1)[1]
     assert '"torch>=2.7", "transformers' not in dependency_block
+
+
+def test_installer_sends_python_scripts_over_stdin_not_dash_c():
+    assert 'function Invoke-PythonScript' in INSTALLER
+    assert '$Script | & $Python - 2>&1' in INSTALLER
+    assert '$probe | & $Python - 2>$null' in INSTALLER
+    assert 'Invoke-PythonScript $Python $download' in INSTALLER
+    assert 'Invoke-PythonScript $Python $warmup' in INSTALLER
+    assert 'Invoke-External $Python @("-c", $download)' not in INSTALLER
+    assert 'Invoke-External $Python @("-c", $warmup)' not in INSTALLER
