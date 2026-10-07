@@ -21,3 +21,11 @@ def test_installer_uses_actual_gemma_q4_filename_pattern_and_discovers_result():
 def test_installer_sets_native_host_default_registry_value_and_accelerator():
     assert "Set-Item -Path $keyPath -Value $ManifestPath" in INSTALLER
     assert 'SetEnvironmentVariable("YTLT_ACCELERATOR", $Accelerator, "User")' in INSTALLER
+
+
+def test_torch_accelerator_probe_cannot_abort_installer_on_native_stderr():
+    source = INSTALLER
+    assert '$previousErrorActionPreference = $ErrorActionPreference' in source
+    assert '$ErrorActionPreference = "Continue"' in source
+    assert '$probeExitCode = $LASTEXITCODE' in source
+    assert 'PyTorch accelerator probe failed; continuing with Vulkan/CPU detection.' in source

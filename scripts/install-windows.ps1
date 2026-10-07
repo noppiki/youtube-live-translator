@@ -103,9 +103,30 @@ function Get-WindowsAccelerator([string]$Python) {
 import torch
 print("cuda" if torch.cuda.is_available() else "cpu")
 '@
-    $result = & $Python -c $probe 2>$null
-    if ($LASTEXITCODE -eq 0 -and ($result -join "").Trim() -eq "cuda") {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $probeExitCode = 1
+    $result = @()
+    try {
+        # Windows PowerShell turns native stderr into ErrorRecord objects. With
+        # $ErrorActionPreference = Stop, an ordinary Python traceback would abort
+        # the entire installer before we can inspect $LASTEXITCODE. GPU detection
+        # is best-effort, so make this probe explicitly non-terminating.
+        $ErrorActionPreference = "Continue"
+        $result = @(& $Python -c $probe 2>$null)
+        $probeExitCode = $LASTEXITCODE
+    }
+    catch {
+        $probeExitCode = 1
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($probeExitCode -eq 0 -and ($result -join "").Trim() -eq "cuda") {
         return "cuda"
+    }
+    if ($probeExitCode -ne 0) {
+        Write-Warning ('PyTorch accelerator probe failed; continuing with Vulkan/CPU detection. Run & "{0}" -c "import torch; print(torch.__version__)" to inspect the PyTorch error.' -f $Python)
     }
     if ((Get-Command vulkaninfo -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $env:WINDIR "System32\vulkan-1.dll"))) {
         return "vulkan"
