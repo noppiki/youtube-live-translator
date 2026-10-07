@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import traceback
 import platform
 import struct
 from pathlib import Path
@@ -427,8 +428,10 @@ async def stream(request: web.Request):
                 break
 
     except Exception as exc:
+        traceback.print_exc()
         if not ws.closed:
-            await ws.send_json({"type": "error", "message": str(exc)})
+            message = f"{type(exc).__name__}: {exc}"
+            await ws.send_json({"type": "error", "message": message})
 
     finally:
         if backend == "qwen" and configured and session is not None and state is not None:
