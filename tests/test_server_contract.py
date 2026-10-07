@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-SERVER_SOURCE = (Path(__file__).parents[1] / "local-server/server.py").read_text()
+SERVER_SOURCE = (Path(__file__).parents[1] / "local-server/server.py").read_text(encoding="utf-8")
 
 
 def test_server_does_not_import_mlx_at_module_load():
@@ -16,4 +16,4 @@ def test_server_keeps_public_routes_and_health_metadata_keys():
     assert 'app.router.add_post("/translate", translate)' in SERVER_SOURCE
     assert 'app.router.add_get("/stream", stream)' in SERVER_SOURCE
     for key in ('"os"', '"asrBackend"', '"translationBackend"', '"accelerator"', '"diarizationAvailable"'):
-        assert key in (Path(__file__).parents[1] / "local-server/backends/runtime.py").read_text()
+        assert key in (Path(__file__).parents[1] / "local-server/backends/runtime.py").read_text(encoding="utf-8")

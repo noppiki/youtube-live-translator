@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-INSTALLER = (Path(__file__).parents[1] / "scripts/install-windows.ps1").read_text()
+INSTALLER = (Path(__file__).parents[1] / "scripts/install-windows.ps1").read_text(encoding="utf-8")
 
 
 def test_installer_searches_releases_with_real_windows_assets():
