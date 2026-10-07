@@ -963,6 +963,8 @@ function openLocalSocket() {
       }));
     };
 
+    let localSocketError = '';
+
     socket.onmessage = async (event) => {
       let data;
       try { data = JSON.parse(event.data); } catch { return; }
@@ -1035,6 +1037,7 @@ function openLocalSocket() {
         sendOverlay('LT_STATUS', { state: 'warning', message: data.message || 'ローカルAI警告' });
       } else if (data.type === 'error') {
         const message = `ローカルSTT: ${data.message || '不明なエラー'}`;
+        localSocketError = message;
         sendOverlay('LT_STATUS', { state: 'error', message });
         if (!settled) {
           settled = true;
@@ -1052,9 +1055,10 @@ function openLocalSocket() {
         reject(new Error('ローカルエンジンが見つかりません。'));
       }
     };
-    socket.onclose = () => {
-      if (running && activeProvider !== 'deepgram') {
-        sendOverlay('LT_STATUS', { state: 'error', message: 'ローカルSTTとの接続が終了しました。' });
+    socket.onclose = (event) => {
+      if (running && activeProvider !== 'deepgram' && !localSocketError) {
+        const detail = event.reason ? `: ${event.reason}` : event.code && event.code !== 1000 ? ` (code ${event.code})` : '';
+        sendOverlay('LT_STATUS', { state: 'error', message: `ローカルSTTとの接続が終了しました${detail}。` });
       }
     };
   });

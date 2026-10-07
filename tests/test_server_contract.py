@@ -17,3 +17,9 @@ def test_server_keeps_public_routes_and_health_metadata_keys():
     assert 'app.router.add_get("/stream", stream)' in SERVER_SOURCE
     for key in ('"os"', '"asrBackend"', '"translationBackend"', '"accelerator"', '"diarizationAvailable"'):
         assert key in (Path(__file__).parents[1] / "local-server/backends/runtime.py").read_text(encoding="utf-8")
+
+
+def test_stream_logs_and_labels_runtime_errors():
+    source = SERVER_SOURCE
+    assert "traceback.print_exc()" in source
+    assert 'f"{type(exc).__name__}: {exc}"' in source
