@@ -91,6 +91,43 @@ function Get-Uv {
     return $existing.Source
 }
 
+
+function Test-NvidiaGpu {
+    if ($DryRun) {
+        return $false
+    }
+
+    try {
+        $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+        if ($nvidiaSmi) {
+            & $nvidiaSmi.Source -L *> $null
+            if ($LASTEXITCODE -eq 0) { return $true }
+        }
+    } catch { }
+
+    try {
+        $controllers = Get-CimInstance Win32_VideoController -ErrorAction Stop
+        return [bool]($controllers | Where-Object { $_.Name -match 'NVIDIA' } | Select-Object -First 1)
+    } catch {
+        return $false
+    }
+}
+
+function Install-PyTorch([string]$Uv, [string]$Python) {
+    if (Test-NvidiaGpu) {
+        Write-Step "NVIDIA GPU detected; installing CUDA-enabled PyTorch"
+        try {
+            Invoke-External $Uv @("pip", "install", "--python", $Python, "--reinstall", "--index-url", "https://download.pytorch.org/whl/cu128", "torch>=2.7")
+            return
+        } catch {
+            Write-Warning "CUDA-enabled PyTorch installation failed; falling back to the standard CPU wheel."
+        }
+    }
+
+    Write-Step "Installing CPU PyTorch"
+    Invoke-External $Uv @("pip", "install", "--python", $Python, "--reinstall", "torch>=2.7")
+}
+
 function Get-WindowsAccelerator([string]$Python) {
     $configured = [string]$env:YTLT_ACCELERATOR
     if ($configured -in @("cuda", "vulkan", "cpu")) {
@@ -103,9 +140,30 @@ function Get-WindowsAccelerator([string]$Python) {
 import torch
 print("cuda" if torch.cuda.is_available() else "cpu")
 '@
-    $result = & $Python -c $probe 2>$null
-    if ($LASTEXITCODE -eq 0 -and ($result -join "").Trim() -eq "cuda") {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $probeExitCode = 1
+    $result = @()
+    try {
+        # Windows PowerShell turns native stderr into ErrorRecord objects. With
+        # $ErrorActionPreference = Stop, an ordinary Python traceback would abort
+        # the entire installer before we can inspect $LASTEXITCODE. GPU detection
+        # is best-effort, so make this probe explicitly non-terminating.
+        $ErrorActionPreference = "Continue"
+        $result = @(& $Python -c $probe 2>$null)
+        $probeExitCode = $LASTEXITCODE
+    }
+    catch {
+        $probeExitCode = 1
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($probeExitCode -eq 0 -and ($result -join "").Trim() -eq "cuda") {
         return "cuda"
+    }
+    if ($probeExitCode -ne 0) {
+        Write-Warning ('PyTorch accelerator probe failed; continuing with Vulkan/CPU detection. Run & "{0}" -c "import torch; print(torch.__version__)" to inspect the PyTorch error.' -f $Python)
     }
     if ((Get-Command vulkaninfo -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $env:WINDIR "System32\vulkan-1.dll"))) {
         return "vulkan"
@@ -294,8 +352,9 @@ $Uv = Get-Uv
 Write-Step "Creating/updating isolated Python 3.12 environment"
 Invoke-External $Uv @("venv", "--python", "3.12", $Venv)
 Invoke-External $Uv @("pip", "install", "--python", $Python,
-    "aiohttp>=3.10", "numpy>=2.0", "torch>=2.7", "transformers>=5.13.0",
+    "aiohttp>=3.10", "numpy>=2.0", "transformers>=5.13.0",
     "accelerate>=1.10", "huggingface_hub>=0.30", "soundfile>=0.12", "pyinstaller>=6.0")
+Install-PyTorch $Uv $Python
 
 Download-SourceFile "local-server/server.py" $Server
 foreach ($backendFile in @("__init__.py", "asr.py", "runtime.py", "translation.py")) {
