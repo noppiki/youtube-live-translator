@@ -26,7 +26,7 @@ $modelDir = Join-Path $AppDir "models\gemma-4-E4B-it-qat-q4_0-gguf"
 $model = Get-ChildItem -LiteralPath $modelDir -Filter "*.gguf" -File -ErrorAction SilentlyContinue | Select-Object -First 1
 $env:YTLT_TRANSLATION_MODEL = if ($model) { $model.FullName } else { "gemma-4-E4B-it-qat-q4_0" }
 $llama = Join-Path $AppDir "llama-cpp\llama-server.exe"
-$pythonw = Join-Path $AppDir ".venv\Scripts\pythonw.exe"
+$python = Join-Path $AppDir ".venv\Scripts\python.exe"
 $server = Join-Path $AppDir "server.py"
 $logDir = Join-Path $AppDir "logs"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -34,6 +34,7 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 if (-not (Test-Port 8766) -and (Test-Path -LiteralPath $llama) -and $model) {
     Start-Process -FilePath $llama -ArgumentList @("-m", $model.FullName, "--host", "127.0.0.1", "--port", "8766") -WorkingDirectory (Split-Path -Parent $llama) -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir "llama.log") -RedirectStandardError (Join-Path $logDir "llama.err.log")
 }
-if (-not (Test-Port 8765) -and (Test-Path -LiteralPath $pythonw) -and (Test-Path -LiteralPath $server)) {
-    Start-Process -FilePath $pythonw -ArgumentList @($server) -WorkingDirectory $AppDir -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir "server.log") -RedirectStandardError (Join-Path $logDir "server.err.log")
+if (-not (Test-Port 8765) -and (Test-Path -LiteralPath $python) -and (Test-Path -LiteralPath $server)) {
+    $env:PYTHONFAULTHANDLER = "1"
+    Start-Process -FilePath $python -ArgumentList @("-X", "faulthandler", "-u", $server) -WorkingDirectory $AppDir -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir "server.log") -RedirectStandardError (Join-Path $logDir "server.err.log")
 }

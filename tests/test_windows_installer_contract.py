@@ -48,3 +48,11 @@ def test_installer_sends_python_scripts_over_stdin_not_dash_c():
     assert 'Invoke-PythonScript $Python $warmup' in INSTALLER
     assert 'Invoke-External $Python @("-c", $download)' not in INSTALLER
     assert 'Invoke-External $Python @("-c", $warmup)' not in INSTALLER
+
+
+def test_windows_server_uses_python_with_faulthandler_logging():
+    start = (Path(__file__).parents[1] / "scripts/start-windows.ps1").read_text(encoding="utf-8")
+    assert '.venv\\Scripts\\python.exe' in start
+    assert 'PYTHONFAULTHANDLER' in start
+    assert '@("-X", "faulthandler", "-u", $server)' in start
+    assert 'pythonw.exe' not in start
