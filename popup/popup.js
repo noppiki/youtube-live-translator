@@ -1,7 +1,24 @@
 const $ = (s) => document.querySelector(s);
 const NATIVE_HOST = 'com.noppiki.youtube_live_translator';
-const PLATFORM = String(globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform || '').toLowerCase();
-const IS_WINDOWS = PLATFORM.includes('win');
+let PLATFORM_OS = 'unknown';
+let IS_WINDOWS = false;
+
+async function detectPlatform() {
+  try {
+    const info = await chrome.runtime.getPlatformInfo();
+    PLATFORM_OS = String(info?.os || 'unknown').toLowerCase();
+    IS_WINDOWS = PLATFORM_OS === 'win';
+    return;
+  } catch {
+    // Fallback for older Chromium builds or unusual extension environments.
+  }
+
+  const fallback = String(
+    globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform || ''
+  ).toLowerCase();
+  PLATFORM_OS = fallback;
+  IS_WINDOWS = fallback.includes('win');
+}
 const WINDOWS_MODELS = [
   { value: 'Qwen/Qwen3-ASR-0.6B-hf', label: 'Qwen3-ASR 0.6B（Windows Transformers・推奨）' },
   { value: 'Qwen/Qwen3-ASR-1.7B-hf', label: 'Qwen3-ASR 1.7B（Windows Transformers・高精度）' }
@@ -11,6 +28,7 @@ const engineMode = $('#engineMode');
 const localBackend = $('#localBackend');
 const localModel = $('#localModel');
 const qwenModelLabel = $('#qwenModelLabel');
+const translationModel = $('#translationModel');
 const localBadge = $('#localBadge');
 const startLocal = $('#startLocal');
 const testLocal = $('#testLocal');
@@ -202,11 +220,17 @@ function configurePlatformUI() {
   if (!WINDOWS_MODELS.some(({ value }) => value === localModel.value)) {
     localModel.value = WINDOWS_MODELS[0].value;
   }
-  $('#translationModelHint').innerHTML = '<strong>Windowsローカル翻訳:</strong> Gemma 4 E4B Q4_0（llama.cpp・CUDA / Vulkan / CPU fallback）';
-  $('#installHint').textContent = 'Windows 10/11 x64用。Qwen3-ASR Transformers、llama.cpp、Gemma 4 E4B、Native Messaging、ログイン時起動を準備します。初回はモデルとランタイムのダウンロードがあります。';
+  translationModel.replaceChildren(Object.assign(document.createElement('option'), {
+    value: 'google/gemma-4-E4B-it-qat-q4_0-gguf',
+    textContent: 'Gemma 4 E4B Q4_0（llama.cpp・固定）'
+  }));
+  translationModel.value = 'google/gemma-4-E4B-it-qat-q4_0-gguf';
+  $('#translationModelHint').textContent = '英・韓・中・西・仏・独 → 日本語。Windowsではllama.cpp経由でGemma 4 E4Bを使用します。';
+  $('#installHint').textContent = 'Windows 10/11 x64用（PowerShell）。Qwen3-ASR Transformers、llama.cpp、Gemma 4 E4B、Native Messaging、ログイン時起動を準備します。初回はモデルとランタイムのダウンロードがあります。';
 }
 
 async function load() {
+  await detectPlatform();
   const stored = await chrome.storage.local.get(DEFAULTS);
   engineMode.value = stored.engineMode;
   localBackend.value = stored.localBackend;
