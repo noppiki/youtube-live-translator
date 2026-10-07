@@ -29,3 +29,12 @@ def test_torch_accelerator_probe_cannot_abort_installer_on_native_stderr():
     assert '$ErrorActionPreference = "Continue"' in source
     assert '$probeExitCode = $LASTEXITCODE' in source
     assert 'PyTorch accelerator probe failed; continuing with Vulkan/CPU detection.' in source
+
+
+def test_installer_prefers_cuda_pytorch_on_nvidia_windows():
+    assert 'function Test-NvidiaGpu' in INSTALLER
+    assert 'Get-CimInstance Win32_VideoController' in INSTALLER
+    assert 'https://download.pytorch.org/whl/cu128' in INSTALLER
+    assert 'Install-PyTorch $Uv $Python' in INSTALLER
+    dependency_block = INSTALLER.split('Write-Step "Creating/updating isolated Python 3.12 environment"', 1)[1]
+    assert '"torch>=2.7", "transformers' not in dependency_block
