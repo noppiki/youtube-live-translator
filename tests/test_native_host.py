@@ -36,3 +36,12 @@ def test_native_message_rejects_oversized_payload():
         assert str(error) == "Message too large"
     else:
         raise AssertionError("oversized native message was accepted")
+
+
+def test_windows_native_host_preserves_crash_logs():
+    source = (Path(__file__).parents[1] / "native-host/launcher.py").read_text(encoding="utf-8")
+    assert 'log_dir = APP_DIR / "logs"' in source
+    assert 'server_env["PYTHONFAULTHANDLER"] = "1"' in source
+    assert '[str(python), "-X", "faulthandler", "-u", str(_windows_server())]' in source
+    assert 'server.err.log' in source
+    assert 'stderr=subprocess.DEVNULL' not in source.split('def start_windows',1)[-1] if 'def start_windows' in source else True
