@@ -40,7 +40,29 @@ uv venv --python 3.12 "$VENV"
 uv pip install --python "$VENV/bin/python" "mlx-qwen3-asr>=0.4.3" "mlx-lm>=0.28" "aiohttp>=3.10" "numpy>=2.0"
 
 echo "▶ Installing local routing server..."
-curl -fsSL "$RAW_BASE/local-server/server.py" -o "$SERVER"
+SERVER_FILES=(
+  local-server/server.py
+  local-server/paths.py
+  local-server/runtime.py
+  local-server/backends/__init__.py
+  local-server/backends/asr_base.py
+  local-server/backends/asr_mlx_qwen.py
+  local-server/backends/asr_torch_qwen.py
+  local-server/backends/translate_base.py
+  local-server/backends/translate_mlx_gemma.py
+  local-server/backends/translate_llamacpp.py
+  local-server/backends/fluid.py
+)
+mkdir -p "$APP_DIR/backends"
+for rel in "${SERVER_FILES[@]}"; do
+  dest="$APP_DIR/${rel#local-server/}"
+  mkdir -p "$(dirname "$dest")"
+  if [[ -f "$(dirname "$0")/../$rel" ]]; then
+    cp "$(dirname "$0")/../$rel" "$dest"
+  else
+    curl -fsSL "$RAW_BASE/$rel" -o "$dest"
+  fi
+done
 
 echo "▶ Preparing Qwen3-ASR 0.6B..."
 "$VENV/bin/python" - <<'PY'

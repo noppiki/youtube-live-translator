@@ -19,7 +19,8 @@ jobs:
           node --check content/content.js
       - name: Python syntax
         run: |
-          python3 -m py_compile local-server/server.py native-host/launcher.py
+          python3 -m py_compile local-server/server.py local-server/paths.py local-server/runtime.py native-host/launcher.py
+          python3 -m py_compile local-server/backends/*.py
       - name: Shell syntax
         run: |
           bash -n scripts/install-macos.sh
@@ -28,11 +29,71 @@ jobs:
         run: |
           python3 -m json.tool manifest.json >/dev/null
 
-  fluid-bridge:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        run: python -m pip install aiohttp numpy
+      - name: Import isolation and API tests
+        run: python -m unittest discover -s tests -v
+        env:
+          YTLT_OS: linux
+          YTLT_APP_DIR: /tmp/ytlt-ci
+
+  macos-regression:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        run: python -m pip install aiohttp numpy
+      - name: macOS profile and installer regression
+        run: python -m unittest tests.test_macos_regression tests.test_import_isolation tests.test_paths tests.test_runtime tests.test_native_host tests.test_health -v
+        env:
+          YTLT_OS: macos
       - name: Swift version
         run: swift --version
       - name: Build FluidAudio bridge
         run: swift build -c release --package-path fluid-bridge
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        run: python -m pip install aiohttp numpy
+      - name: Python import and API tests
+        run: python -m unittest discover -s tests -v
+        env:
+          YTLT_OS: windows
+          YTLT_ACCELERATOR: cpu
+      - name: Native host framing
+        run: python -m unittest tests.test_native_host -v
+        env:
+          YTLT_OS: windows
+      - name: PowerShell syntax
+        shell: pwsh
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            "scripts/install-windows.ps1",
+            [ref]$null,
+            [ref]$errors
+          )
+          if ($errors) {
+            $errors | ForEach-Object { $_.ToString() }
+            exit 1
+          }
+      - name: Installer dry-run
+        shell: pwsh
+        run: |
+          ./scripts/install-windows.ps1 -DryRun -Force -ExtensionId abcdefghijklmnopabcdefghijklmnop

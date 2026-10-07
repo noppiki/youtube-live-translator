@@ -10,7 +10,9 @@ const startLocal = $('#startLocal');
 const testLocal = $('#testLocal');
 const installModel = $('#installModel');
 const installCommand = $('#installCommand');
+const installHint = $('#installHint');
 const copyInstall = $('#copyInstall');
+const performanceWarning = $('#performanceWarning');
 const apiKey = $('#apiKey');
 const apiKeyLabel = $('#apiKeyLabel');
 const sourceLanguage = $('#sourceLanguage');
@@ -34,6 +36,21 @@ const startButton = $('#start');
 const stopButton = $('#stop');
 const status = $('#status');
 
+const MACOS_MODELS = [
+  { id: 'moona3k/mlx-qwen3-asr-0.6b-4bit', label: 'Qwen3-ASR 0.6B 4-bit（推奨・約517MB）' },
+  { id: 'moona3k/mlx-qwen3-asr-1.7b-4bit', label: 'Qwen3-ASR 1.7B 4-bit（高精度・約1.2GB）' }
+];
+const WINDOWS_MODELS = [
+  { id: 'Qwen/Qwen3-ASR-0.6B-hf', label: 'Qwen3-ASR 0.6B（推奨）' },
+  { id: 'Qwen/Qwen3-ASR-1.7B-hf', label: 'Qwen3-ASR 1.7B（高精度）' }
+];
+const MODEL_ALIASES = {
+  'moona3k/mlx-qwen3-asr-0.6b-4bit': 'Qwen/Qwen3-ASR-0.6B-hf',
+  'moona3k/mlx-qwen3-asr-1.7b-4bit': 'Qwen/Qwen3-ASR-1.7B-hf',
+  'Qwen/Qwen3-ASR-0.6B-hf': 'moona3k/mlx-qwen3-asr-0.6b-4bit',
+  'Qwen/Qwen3-ASR-1.7B-hf': 'moona3k/mlx-qwen3-asr-1.7b-4bit'
+};
+
 const DEFAULTS = {
   engineMode: 'auto',
   localBackend: 'auto',
@@ -48,6 +65,67 @@ const DEFAULTS = {
   domainTerms: 'OpenAI\nAnthropic\nClaude\nGemini\nCursor\nCodex\nMCP\nNVIDIA',
   endpointingMs: 350
 };
+
+let detectedOs = 'macos';
+
+async function detectOs() {
+  try {
+    const info = await chrome.runtime.getPlatformInfo();
+    if (info?.os === 'win') return 'windows';
+    if (info?.os === 'mac') return 'macos';
+  } catch {
+  }
+  return /Windows/i.test(navigator.userAgent) ? 'windows' : 'macos';
+}
+
+function defaultModelForOs(os) {
+  return os === 'windows' ? WINDOWS_MODELS[0].id : MACOS_MODELS[0].id;
+}
+
+function populateModels(os, selected) {
+  const models = os === 'windows' ? WINDOWS_MODELS : MACOS_MODELS;
+  const wanted = models.some((item) => item.id === selected)
+    ? selected
+    : (MODEL_ALIASES[selected] && models.some((item) => item.id === MODEL_ALIASES[selected])
+      ? MODEL_ALIASES[selected]
+      : models[0].id);
+  localModel.innerHTML = models.map((item) => (
+    `<option value="${item.id}">${item.label}</option>`
+  )).join('');
+  localModel.value = wanted;
+  return wanted;
+}
+
+function applyPlatformUi(os, health) {
+  const windows = os === 'windows' || health?.os === 'windows';
+  const fluidOption = localBackend.querySelector('option[value="fluid"]');
+  if (fluidOption) fluidOption.hidden = windows;
+  if (windows && localBackend.value === 'fluid') localBackend.value = 'auto';
+  if (windows) {
+    const autoOption = localBackend.querySelector('option[value="auto"]');
+    if (autoOption) autoOption.textContent = '自動（Qwen3-ASR）';
+  }
+  diarization.disabled = windows;
+  if (windows) {
+    diarization.checked = false;
+    diarizationHint.textContent = 'Windows初版では話者分離は準備中です。';
+    speakerNameInference.disabled = true;
+    prepareSpeakerAI.disabled = true;
+    speakerNameInferenceHint.textContent = '話者名推定はmacOSのFluidAudio話者分離時のみ利用できます。';
+    installHint.textContent = 'Windows 10/11 x64用。Qwen3-ASRとGemma 4 E4Bを準備します。PowerShellで実行してください。';
+  }
+  const warning = health?.performanceWarning;
+  if (warning) {
+    performanceWarning.hidden = false;
+    performanceWarning.textContent = warning;
+  } else if (windows && health?.accelerator === 'cpu') {
+    performanceWarning.hidden = false;
+    performanceWarning.textContent = 'CPUのみで動作しています。ライブ字幕が遅れる場合があります。';
+  } else {
+    performanceWarning.hidden = true;
+    performanceWarning.textContent = '';
+  }
+}
 
 function sendNative(action) {
   return new Promise((resolve, reject) => {
@@ -68,6 +146,7 @@ async function nativeStatus() {
 }
 
 function effectiveLocalBackend() {
+  if (detectedOs === 'windows') return 'qwen';
   if (localBackend.value === 'fluid') return 'fluid';
   if (localBackend.value === 'qwen') return 'qwen';
   return sourceLanguage.value === 'en' && diarization.checked ? 'fluid' : 'qwen';
@@ -82,17 +161,20 @@ async function checkLocal(showStatus = false) {
     const data = await response.json();
     if (!data?.ok) throw new Error('not ready');
 
-    const fluidReady = Boolean(data.fluidAudio?.available);
+    if (data.os === 'windows' || data.os === 'macos') detectedOs = data.os;
+    applyPlatformUi(detectedOs, data);
+    const fluidReady = Boolean(data.fluidAudio?.available) && detectedOs !== 'windows';
+    const asrLabel = data.asrBackend === 'torch' ? 'Qwen3-ASR (torch)' : 'Qwen3-ASR';
     localBadge.textContent = fluidReady
       ? '接続済み · FluidAudio + Gemma 4 E4B'
-      : '接続済み · Qwen3-ASR + Gemma 4 E4B';
+      : `接続済み · ${asrLabel} + Gemma 4 E4B`;
     localBadge.className = 'badge online';
     startLocal.disabled = true;
     startLocal.textContent = '起動済み';
     if (showStatus) {
       status.textContent = fluidReady
         ? '接続済み。自動音声認識: Qwen3-ASR優先（話者分離ON時のみFluidAudio）、翻訳: Gemma 4 E4B。'
-        : '接続済み。音声認識: Qwen3-ASR、翻訳: Gemma 4 E4B。';
+        : `接続済み。音声認識: ${asrLabel}、翻訳: Gemma 4 E4B。`;
     }
     return data;
   } catch {
@@ -122,8 +204,9 @@ function updateVisibility() {
   const backend = effectiveLocalBackend();
   const fluid = backend === 'fluid';
   const english = sourceLanguage.value === 'en';
+  const windows = detectedOs === 'windows';
   const canUseFluidDiarization =
-    english && (localBackend.value === 'fluid' || localBackend.value === 'auto');
+    !windows && english && (localBackend.value === 'fluid' || localBackend.value === 'auto');
 
   apiKeyLabel.style.display = mode === 'local' ? 'none' : 'grid';
   endpointingLabel.style.display = mode === 'local' ? 'none' : 'grid';
@@ -132,8 +215,11 @@ function updateVisibility() {
   domainTermsLabel.style.display = 'grid';
   domainTermsHint.style.display = 'block';
 
-  diarization.disabled = !canUseFluidDiarization;
-  if (!canUseFluidDiarization) {
+  diarization.disabled = windows || !canUseFluidDiarization;
+  if (windows) {
+    diarization.checked = false;
+    diarizationHint.textContent = 'Windows初版では話者分離は準備中です。';
+  } else if (!canUseFluidDiarization) {
     diarizationHint.textContent = english
       ? '話者分離を使うにはローカルバックエンドをFluidAudioまたは自動にしてください。'
       : '現在のライブ話者分離は英語＋FluidAudio時のみ利用できます。';
@@ -158,15 +244,26 @@ function updateVisibility() {
 }
 
 function updateInstallCommand() {
+  const id = chrome.runtime.id;
+  if (detectedOs === 'windows') {
+    installCommand.value =
+      `irm https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-windows.ps1 -OutFile "$env:TEMP\\ytlt-install.ps1"; & "$env:TEMP\\ytlt-install.ps1" -ExtensionId '${id}'`;
+    return;
+  }
   installCommand.value =
-    `curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash -s -- ${chrome.runtime.id}`;
+    `curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-macos.sh | bash -s -- ${id}`;
 }
 
 async function load() {
+  detectedOs = await detectOs();
   const stored = await chrome.storage.local.get(DEFAULTS);
   engineMode.value = stored.engineMode;
   localBackend.value = stored.localBackend;
-  localModel.value = stored.localModel;
+  const selectedModel = populateModels(detectedOs, stored.localModel || defaultModelForOs(detectedOs));
+  if (selectedModel !== stored.localModel) {
+    await chrome.storage.local.set({ localModel: selectedModel });
+  }
+  applyPlatformUi(detectedOs);
   apiKey.value = stored.deepgramApiKey || '';
   sourceLanguage.value = stored.sourceLanguage;
   targetLanguage.value = stored.targetLanguage;
@@ -357,6 +454,11 @@ startButton.addEventListener('click', async () => {
   }
 
   const backend = effectiveLocalBackend();
+  if (detectedOs === 'windows' && settings.diarization) {
+    status.textContent = 'Windows初版では話者分離は利用できません。';
+    return;
+  }
+
   if (settings.diarization && (backend !== 'fluid' || settings.sourceLanguage !== 'en')) {
     status.textContent = '話者分離は英語＋FluidAudio時のみ利用できます。';
     return;
