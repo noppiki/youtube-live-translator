@@ -29,6 +29,35 @@ function Invoke-External([string]$Command, [string[]]$Arguments) {
     }
 }
 
+function Invoke-PythonScript([string]$Python, [string]$Script) {
+    Write-Host ("> {0} - <Python script via stdin>" -f $Python)
+    if ($DryRun) {
+        return @()
+    }
+
+    # Windows PowerShell 5.1 can rewrite/strip quotes inside native-process
+    # arguments passed to `python -c`, corrupting valid Python such as model IDs
+    # containing version-like text (for example Qwen3-ASR-0.6B). Send the script
+    # over stdin instead so PowerShell never parses Python string literals.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $result = @($Script | & $Python - 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($exitCode -ne 0) {
+        if ($result) {
+            $result | ForEach-Object { Write-Host $_ }
+        }
+        throw ("Python script failed with exit code {0}: {1}" -f $exitCode, $Python)
+    }
+    return $result
+}
+
 function Ensure-Directory([string]$Path) {
     if ($DryRun) {
         Write-Host "+ mkdir $Path"
@@ -149,7 +178,7 @@ print("cuda" if torch.cuda.is_available() else "cpu")
         # the entire installer before we can inspect $LASTEXITCODE. GPU detection
         # is best-effort, so make this probe explicitly non-terminating.
         $ErrorActionPreference = "Continue"
-        $result = @(& $Python -c $probe 2>$null)
+        $result = @($probe | & $Python - 2>$null)
         $probeExitCode = $LASTEXITCODE
     }
     catch {
@@ -267,7 +296,7 @@ snapshot_download(
 )
 print('Gemma model ready.')
 "@
-    Invoke-External $Python @("-c", $download)
+    Invoke-PythonScript $Python $download | Out-Null
 }
 
 function Prepare-QwenModel([string]$Python) {
@@ -284,7 +313,7 @@ except TypeError:
     AutoModelForMultimodalLM.from_pretrained(model_id, device_map="auto", torch_dtype=dtype)
 print("Qwen3-ASR ready.")
 '@
-    Invoke-External $Python @("-c", $warmup)
+    Invoke-PythonScript $Python $warmup | Out-Null
 }
 
 function Register-NativeMessaging([string]$NativeHost, [string]$ManifestPath) {
