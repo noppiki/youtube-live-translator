@@ -26,7 +26,7 @@
         <span id="localBadge" class="badge offline">確認中</span>
       </div>
 
-      <label>
+      <label id="localBackendLabel">
         音声認識バックエンド
         <select id="localBackend">
           <option value="auto">自動（Qwen3優先 / 話者分離ON時のみFluidAudio）</option>
@@ -44,6 +44,7 @@
       </label>
 
       <p class="hint" id="translationModelHint"><strong>翻訳モデル:</strong> Gemma 4 E4B IT（英・韓・中・西・仏・独 → 日本語）</p>
+      <p class="hint" id="performanceWarning" hidden></p>
 
       <label class="checkLabel" id="diarizationLabel">
         <input id="diarization" type="checkbox">
@@ -66,7 +67,7 @@
 
       <details>
         <summary>初回インストール / ローカルAI更新</summary>
-        <p class="hint">Apple Silicon Mac用。FluidAudioに加えてGemma 4 E4B 4B翻訳モデルも準備します。既存ユーザーも一度再実行してください。</p>
+        <p class="hint" id="installHint">Apple Silicon Mac用。FluidAudioに加えてGemma 4 E4B 4B翻訳モデルも準備します。既存ユーザーも一度再実行してください。</p>
         <textarea id="installCommand" readonly rows="3"></textarea>
         <button id="copyInstall">コマンドをコピー</button>
       </details>

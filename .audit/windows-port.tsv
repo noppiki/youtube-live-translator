@@ -1,0 +1,13 @@
+ts	phase	decision	why	evidence	result
+2026-10-07T04:20:00Z	start	opened figure-it-out for Issue #1 Windows local AI	large cross-cutting change with a settled issue design	https://github.com/noppiki/youtube-live-translator/issues/1	framed
+2026-10-07T04:25:00Z	frame	done means 8765 API stays, macOS MLX/Fluid stays, Windows torch+llamacpp ships, PR is open and unmerged	acceptance is the issue list, not a redesign	.audit/windows-port.tsv	open
+2026-10-07T04:30:00Z	design	skipped a second arena because the issue already named backends, APP_DIR, llama.cpp, and installer steps	another design bakeoff would not change the public contract	local-server/runtime.py	RuntimeProfile chosen
+2026-10-07T04:40:00Z	harness	wrote import isolation, path, health, framing, installer, and macOS regression tests first	a Windows port that imports MLX at boot is the original blocker	tests/test_import_isolation.py	pending run
+2026-10-07T04:50:00Z	runtime	one RuntimeProfile owns os, backends, accelerator, models, and diarization	scattered if windows checks in server.py would rot	local-server/runtime.py	implemented
+2026-10-07T05:00:00Z	backends	MLX imports live only in mlx backend modules	server.py must import on Windows CI without MLX	local-server/server.py	implemented
+2026-10-07T05:10:00Z	windows	torch ASR uses chunked Transformers generate; translation calls llama-server on 8766	Transformers has no first-party streaming API matching mlx Session	local-server/backends/asr_torch_qwen.py	implemented
+2026-10-07T05:20:00Z	install	Task Scheduler ONLOGON plus Native Messaging registry; DryRun exits before network	reinstalls must converge and CI cannot download models	scripts/install-windows.ps1	implemented
+2026-10-07T05:25:00Z	macos	install-macos.sh now copies backends/ next to server.py	a split server without those files would break existing Mac installs	scripts/install-macos.sh	implemented
+2026-10-07T05:40:00Z	verify	python -m unittest discover -s tests -v	25 tests, one schtasks miss on Linux, then shutil.which guard	tests/	tests green
+2026-10-07T05:41:00Z	verify	node --check popup/popup.js and py_compile plus bash -n	syntax of the touched scripts	popup/popup.js	syntax ok
+2026-10-07T05:50:00Z	fix	Windows without nvidia now defaults to cpu, not vulkan	a missing nvidia-smi is not proof of Vulkan	local-server/runtime.py	tests green

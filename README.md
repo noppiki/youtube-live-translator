@@ -166,10 +166,17 @@ FluidAudioのモデルは必要になった時点で設定画面の **モデル�
 
 ### Qwen3-ASR
 
+macOS (MLX):
+
 - バランス: `moona3k/mlx-qwen3-asr-0.6b-4bit`
 - 高精度: `moona3k/mlx-qwen3-asr-1.7b-4bit`
 
-Qwen3-ASRは日本語・中国語を含む多言語と、専門用語 `context` 用として残しています。
+Windows (PyTorch / Transformers):
+
+- バランス: `Qwen/Qwen3-ASR-0.6B-hf`
+- 高精度: `Qwen/Qwen3-ASR-1.7B-hf`
+
+Qwen3-ASRは日本語・中国語を含む多言語と、専門用語 `context` 用として残しています。Windows初版の話者分離は未対応です。
 
 ## 構成
 
@@ -188,7 +195,8 @@ Chrome Extension
        │    ├─ Parakeet EOU
        │    └─ Sortformer
        │
-       └─ Qwen3-ASR MLX
+       ├─ Qwen3-ASR MLX (macOS)
+       └─ Qwen3-ASR PyTorch + llama.cpp Gemma 4 (Windows)
 ```
 
 ### 主な技術
@@ -198,7 +206,8 @@ Chrome Extension
 - `chrome.offscreen`
 - Native Messaging
 - Python / aiohttp routing server
-- MLX / Qwen3-ASR
+- MLX / Qwen3-ASR (macOS)
+- Transformers Qwen3-ASR + llama.cpp Gemma 4 E4B (Windows)
 - Swift / FluidAudio
 - CoreML / Apple Neural Engine
 - Chrome Translator API
@@ -254,6 +263,7 @@ curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/mai
 ~/Library/Application Support/YouTubeLiveTranslator/
 ├── .venv/
 ├── server.py
+├── backends/
 ├── bin/
 │   └── fluid-bridge
 ├── fluid-bridge-src/
@@ -262,6 +272,39 @@ curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/mai
 ```
 
 FluidAudioモデルはFluidAudio標準のモデルキャッシュへ保存されます。
+
+## Windows 10/11 x64 のローカルAI導入
+
+拡張を一度Chromeへ読み込んでから、ポップアップのインストール欄に表示されるPowerShellコマンドを実行してください。
+
+```powershell
+irm https://raw.githubusercontent.com/noppiki/youtube-live-translator/main/scripts/install-windows.ps1 -OutFile "$env:TEMP\ytlt-install.ps1"; & "$env:TEMP\ytlt-install.ps1" -ExtensionId 'YOUR_EXTENSION_ID'
+```
+
+インストーラが行うこと:
+
+- `uv` と Python 3.12 隔離環境
+- Qwen3-ASR 0.6B (Transformers)
+- Gemma 4 E4B Q4_0 (llama.cpp)
+- NVIDIA CUDA 優先、なければ Vulkan、最後に CPU
+- ログイン時自動起動 (Task Scheduler)
+- Chrome Native Messaging 登録
+- `http://127.0.0.1:8765/health` が 200 になるまで確認
+
+配置先:
+
+```
+%LOCALAPPDATA%\YouTubeLiveTranslator\
+├── .venv\
+├── server.py
+├── backends\
+├── bin\llama-server.exe
+├── models\
+├── native\
+└── logs\
+```
+
+Windows初版ではFluidAudioと話者分離は使いません。CPUのみの場合はポップアップに性能警告を出します。
 
 ## v0.3以前から更新する場合
 
