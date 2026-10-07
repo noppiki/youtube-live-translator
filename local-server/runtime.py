@@ -108,16 +108,16 @@ def _detect_accelerator(os_name: str, state: dict[str, Any]) -> str:
         return "metal"
     if _has_nvidia():
         return "cuda"
-    if os_name == "windows":
-        return "vulkan"
     return "cpu"
 
 
 def _performance_warning(os_name: str, accelerator: str) -> str | None:
-    if os_name == "windows" and accelerator == "cpu":
+    if os_name != "windows":
+        return None
+    if accelerator == "cpu":
         return "CPU only. Live captions may lag. A CUDA or Vulkan GPU is recommended."
-    if os_name == "windows" and accelerator == "vulkan":
-        return "Vulkan GPU path. NVIDIA CUDA is faster when a supported GPU is available."
+    if accelerator == "vulkan":
+        return "ASR runs on CPU. Translation uses Vulkan. NVIDIA CUDA is faster for both."
     return None
 
 

@@ -256,11 +256,13 @@ if (-not (Test-Path $gguf)) {
 
 $startScript = Join-Path $AppDir "start-local.ps1"
 @"
-`$ErrorActionPreference = 'SilentlyContinue'
+`$ErrorActionPreference = 'Stop'
 `$env:YTLT_APP_DIR = '$AppDir'
 `$python = '$Python'
 if (Test-Path '$PythonW') { `$python = '$PythonW' }
-Start-Process -FilePath `$python -ArgumentList '"$AppDir\server.py"' -WorkingDirectory '$AppDir' -WindowStyle Hidden
+`$logDir = '$LogDir'
+New-Item -ItemType Directory -Force -Path `$logDir | Out-Null
+Start-Process -FilePath `$python -ArgumentList '"$AppDir\server.py"' -WorkingDirectory '$AppDir' -WindowStyle Hidden -RedirectStandardOutput (Join-Path `$logDir 'server.log') -RedirectStandardError (Join-Path `$logDir 'server.err.log')
 "@ | Set-Content -Path $startScript -Encoding UTF8
 
 $taskXml = @"

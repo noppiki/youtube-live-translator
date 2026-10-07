@@ -58,6 +58,15 @@ class RuntimeProfileTests(unittest.TestCase):
         self.assertEqual(current.models["balanced"]["id"], "Qwen/Qwen3-ASR-0.6B-hf")
         self.assertIn("CPU only", current.performance_warning or "")
 
+    def test_windows_without_nvidia_defaults_to_cpu_not_vulkan(self):
+        os.environ["YTLT_OS"] = "windows"
+        os.environ["YTLT_APP_DIR"] = "/tmp/ytlt-win-cpu"
+        os.environ.pop("YTLT_ACCELERATOR", None)
+        runtime = self._runtime()
+        current = runtime.profile()
+        self.assertEqual(current.accelerator, "cpu")
+        self.assertIn("CPU only", current.performance_warning or "")
+
     def test_windows_accepts_mlx_model_alias(self):
         os.environ["YTLT_OS"] = "windows"
         os.environ["YTLT_APP_DIR"] = "/tmp/ytlt-win"

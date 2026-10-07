@@ -10,3 +10,4 @@ ts	phase	decision	why	evidence	result
 2026-10-07T05:25:00Z	macos	install-macos.sh now copies backends/ next to server.py	a split server without those files would break existing Mac installs	scripts/install-macos.sh	implemented
 2026-10-07T05:40:00Z	verify	python -m unittest discover -s tests -v	25 tests, one schtasks miss on Linux, then shutil.which guard	tests/	tests green
 2026-10-07T05:41:00Z	verify	node --check popup/popup.js and py_compile plus bash -n	syntax of the touched scripts	popup/popup.js	syntax ok
+2026-10-07T05:50:00Z	fix	Windows without nvidia now defaults to cpu, not vulkan	a missing nvidia-smi is not proof of Vulkan	local-server/runtime.py	tests green
