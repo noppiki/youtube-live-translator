@@ -43,7 +43,9 @@ echo "▶ Installing local routing server..."
 curl -fsSL "$RAW_BASE/local-server/server.py" -o "$SERVER"
 mkdir -p "$APP_DIR/backends"
 for backend_file in __init__.py asr.py runtime.py translation.py; do
-  curl -fsSL "$RAW_BASE/local-server/backends/$backend_file" -o "$APP_DIR/backends/$backend_file"
+  backend_tmp="$APP_DIR/backends/.$backend_file.tmp"
+  curl -fsSL "$RAW_BASE/local-server/backends/$backend_file" -o "$backend_tmp"
+  mv "$backend_tmp" "$APP_DIR/backends/$backend_file"
 done
 
 echo "▶ Preparing Qwen3-ASR 0.6B..."
