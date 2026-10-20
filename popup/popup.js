@@ -474,7 +474,7 @@ function renderSpeakers(data) {
       } catch (error) {
         status.textContent = `削除エラー: ${error?.message || error}`;
       }
-      refreshSpeakers();
+      refreshSpeakerPanel();
     });
     row.append(name, remove);
     enrolledList.append(row);
@@ -502,7 +502,7 @@ function renderSpeakers(data) {
   enrollAudioFile.disabled = !fluidAvailable;
 }
 
-async function refreshSpeakers() {
+async function refreshSpeakerPanel() {
   const data = await fetchSpeakers();
   fluidAvailable = Boolean(data?.matching?.available);
   if (!data) {
@@ -550,7 +550,7 @@ enrollLiveSpeaker.addEventListener('click', async () => {
   } catch (error) {
     status.textContent = `登録エラー: ${error?.message || error}`;
   }
-  refreshSpeakers();
+  refreshSpeakerPanel();
 });
 
 async function fileToPcm16Base64(file) {
@@ -605,15 +605,15 @@ enrollAudioFile.addEventListener('click', async () => {
   } catch (error) {
     status.textContent = `登録エラー: ${error?.message || error}`;
   }
-  refreshSpeakers();
+  refreshSpeakerPanel();
 });
 
-refreshSpeakers.addEventListener('click', refreshSpeakers);
+refreshSpeakers.addEventListener('click', refreshSpeakerPanel);
 
 speakerEnrollDetails.addEventListener('toggle', () => {
   if (speakerEnrollDetails.open) {
-    refreshSpeakers();
-    if (!speakersPoll) speakersPoll = setInterval(refreshSpeakers, 4000);
+    refreshSpeakerPanel();
+    if (!speakersPoll) speakersPoll = setInterval(refreshSpeakerPanel, 4000);
   } else if (speakersPoll) {
     clearInterval(speakersPoll);
     speakersPoll = null;
