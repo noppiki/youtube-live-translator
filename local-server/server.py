@@ -1067,11 +1067,41 @@ def _port_free() -> bool:
         return True
 
 
+def _acquire_instance_lock() -> int | None:
+    """Exclusive non-blocking lock so at most one server instance can run.
+
+    Only the holder writes speaker.token, which closes the check-then-bind
+    race where a concurrent duplicate could clobber the active credential.
+    """
+
+    lock_path = APP_DIR / "server.lock"
+    try:
+        APP_DIR.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        return None
+    try:
+        if platform.system() == "Windows":
+            import msvcrt
+
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, ImportError):
+        os.close(fd)
+        return None
+    return fd
+
+
 if __name__ == "__main__":
-    # Publish the token just before binding, and only when the port is free:
-    # the native launcher can then always read a credential matching the
-    # running server, and a duplicate launch that fails to bind cannot
-    # clobber it.
+    _instance_lock = _acquire_instance_lock()
+    if _instance_lock is None:
+        raise SystemExit(f"YouTube Live Translator はすでに起動しています ({HOST}:{PORT})")
+    # The lock holder publishes the token before binding so the native
+    # launcher can always read the credential of the server that wins the
+    # port; a duplicate that loses the lock exits without writing.
     if _port_free():
         _write_speaker_token()
     web.run_app(app, host=HOST, port=PORT, access_log=None)
