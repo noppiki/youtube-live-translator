@@ -41,6 +41,13 @@ uv pip install --python "$VENV/bin/python" "mlx-qwen3-asr>=0.4.3" "mlx-lm>=0.28"
 
 echo "▶ Installing local routing server..."
 curl -fsSL "$RAW_BASE/local-server/server.py" -o "$SERVER"
+mkdir -p "$APP_DIR/backends"
+backends_tmp="$(mktemp -d "$APP_DIR/.backends.XXXXXX")"
+trap 'rm -rf "$backends_tmp"' EXIT
+for backend_file in __init__.py asr.py runtime.py translation.py; do
+  curl -fsSL "$RAW_BASE/local-server/backends/$backend_file" -o "$backends_tmp/$backend_file"
+  mv "$backends_tmp/$backend_file" "$APP_DIR/backends/$backend_file"
+done
 
 echo "▶ Preparing Qwen3-ASR 0.6B..."
 "$VENV/bin/python" - <<'PY'
