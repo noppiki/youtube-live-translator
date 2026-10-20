@@ -15,6 +15,20 @@ def test_server_keeps_public_routes_and_health_metadata_keys():
     assert 'app.router.add_post("/models/install", install_model)' in SERVER_SOURCE
     assert 'app.router.add_post("/translate", translate)' in SERVER_SOURCE
     assert 'app.router.add_get("/stream", stream)' in SERVER_SOURCE
+    assert 'app.router.add_get("/speakers", list_speakers)' in SERVER_SOURCE
+    assert 'app.router.add_post("/speakers/enroll", enroll_speaker)' in SERVER_SOURCE
+    assert 'app.router.add_delete("/speakers/{speaker_id}", delete_speaker)' in SERVER_SOURCE
+
+
+def test_speaker_enrollment_contract():
+    source = SERVER_SOURCE
+    # Enrolled voices are matched by cosine distance against WeSpeaker
+    # embeddings produced by the fluid-bridge process.
+    assert "SPEAKER_MATCH_MAX_DISTANCE" in source
+    assert 'data.get("speakerIndex")' in source
+    assert 'data.get("audioBase64")' in source
+    assert '"source": "voice-enrollment"' in source
+    assert 'kind == "speakerName"' or '"type": "speakerName"' in source
     for key in ('"os"', '"asrBackend"', '"translationBackend"', '"accelerator"', '"diarizationAvailable"'):
         assert key in (Path(__file__).parents[1] / "local-server/backends/runtime.py").read_text(encoding="utf-8")
 

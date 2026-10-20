@@ -676,6 +676,28 @@ function profileLabelForOverlay(speaker, profile) {
   });
 }
 
+function applyEnrolledSpeakerName(message) {
+  if (!Number.isInteger(message.speaker)) return;
+  const name = String(message.name || '').trim().slice(0, 80);
+  if (!name) {
+    // Server cleared the enrollment (voice deleted): drop the profile so
+    // captions fall back to the generic speaker label.
+    if (speakerProfiles.delete(message.speaker)) {
+      profileLabelForOverlay(message.speaker, null);
+    }
+    return;
+  }
+
+  const profile = {
+    name,
+    role: '',
+    confidence: Math.max(0.9, Math.min(0.99, Number(message.confidence || 0.99))),
+    source: 'voice-enrollment'
+  };
+  speakerProfiles.set(message.speaker, profile);
+  profileLabelForOverlay(message.speaker, profile);
+}
+
 function rememberFinalUtterance({ utteranceId, text, speaker, startMs, endMs }) {
   if (!text?.trim()) return;
   const idx = finalizedConversation.findIndex((u) => u.utteranceId === utteranceId);
@@ -732,6 +754,7 @@ function inferExplicitNames() {
 
   for (const [speaker, profile] of bySpeaker) {
     const previous = speakerProfiles.get(speaker);
+    if (previous?.source === 'voice-enrollment') continue;
     if (!previous || profile.confidence > Number(previous.confidence || 0)) {
       speakerProfiles.set(speaker, profile);
       profileLabelForOverlay(speaker, profile);
@@ -829,6 +852,7 @@ ${transcript}`;
       };
 
       const previous = speakerProfiles.get(candidate.speaker);
+      if (previous?.source === 'voice-enrollment') continue;
       if (!previous || profile.confidence >= Number(previous.confidence || 0) + 0.05 ||
           (!previous.name && profile.name && profile.confidence >= 0.7)) {
         speakerProfiles.set(candidate.speaker, profile);
@@ -1033,6 +1057,8 @@ function openLocalSocket() {
         });
       } else if (data.type === 'speaker') {
         addSpeakerPoint(data.speaker, data.changeAtMs);
+      } else if (data.type === 'speakerName') {
+        applyEnrolledSpeakerName(data);
       } else if (data.type === 'warning') {
         sendOverlay('LT_STATUS', { state: 'warning', message: data.message || 'ローカルAI警告' });
       } else if (data.type === 'error') {

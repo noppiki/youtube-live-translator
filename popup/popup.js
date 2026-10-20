@@ -49,6 +49,15 @@ const speakerNameInference = $('#speakerNameInference');
 const speakerNameInferenceLabel = $('#speakerNameInferenceLabel');
 const speakerNameInferenceHint = $('#speakerNameInferenceHint');
 const prepareSpeakerAI = $('#prepareSpeakerAI');
+const speakerEnrollDetails = $('#speakerEnrollDetails');
+const speakerEnrollHint = $('#speakerEnrollHint');
+const enrolledList = $('#enrolledList');
+const speakerNameInput = $('#speakerNameInput');
+const liveSpeakerSelect = $('#liveSpeakerSelect');
+const speakerAudioFile = $('#speakerAudioFile');
+const enrollLiveSpeaker = $('#enrollLiveSpeaker');
+const enrollAudioFile = $('#enrollAudioFile');
+const refreshSpeakers = $('#refreshSpeakers');
 const domainTerms = $('#domainTerms');
 const domainTermsLabel = $('#domainTermsLabel');
 const domainTermsHint = $('#domainTermsHint');
@@ -202,6 +211,7 @@ function updateInstallCommand() {
 }
 
 function configurePlatformUI() {
+  speakerEnrollDetails.style.display = IS_WINDOWS ? 'none' : '';
   if (!IS_WINDOWS) return;
 
   const fluidOption = localBackend.querySelector('option[value="fluid"]');
@@ -338,7 +348,11 @@ installModel.addEventListener('click', async () => {
 
   try {
     const body = backend === 'fluid'
-      ? { engine: 'fluid', diarization: Boolean(diarization.checked) }
+      ? {
+          engine: 'fluid',
+          diarization: Boolean(diarization.checked),
+          voiceprint: Boolean(diarization.checked)
+        }
       : { engine: 'qwen', model: localModel.value };
 
     const response = await fetch('http://127.0.0.1:8765/models/install', {
@@ -410,6 +424,246 @@ async function prepareSpeakerNameAI({ silent = false } = {}) {
 }
 
 prepareSpeakerAI.addEventListener('click', () => prepareSpeakerNameAI({ silent: false }));
+
+// ---- Voice enrollment (speaker identification) ----
+
+let speakersPoll = null;
+let fluidAvailable = false;
+
+function speakerLetter(index) {
+  return String.fromCharCode(65 + (index % 26));
+}
+
+let speakerTokenCache = null;
+
+async function speakerApiHeaders() {
+  if (speakerTokenCache === null) {
+    try {
+      const response = await sendNative('speakerToken');
+      speakerTokenCache = response?.ok ? String(response.token || '') : '';
+    } catch {
+      speakerTokenCache = '';
+    }
+  }
+  return speakerTokenCache ? { 'X-YTLT-Token': speakerTokenCache } : {};
+}
+
+async function speakerFetch(path, options = {}) {
+  const doFetch = async () => fetch(`http://127.0.0.1:8765${path}`, {
+    ...options,
+    headers: { ...(await speakerApiHeaders()), ...(options.headers || {}) }
+  });
+  let response = await doFetch();
+  if (response.status === 403) {
+    // The token rotates with each server start; refresh once and retry.
+    speakerTokenCache = null;
+    response = await doFetch();
+  }
+  return response;
+}
+
+async function fetchSpeakers() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const response = await speakerFetch('/speakers', { signal: controller.signal });
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function renderSpeakers(data) {
+  const speakers = data?.speakers || [];
+  const live = data?.live || {};
+
+  enrolledList.replaceChildren();
+  if (!speakers.length) {
+    const empty = document.createElement('div');
+    empty.className = 'enrolledEmpty';
+    empty.textContent = '登録済みの話者はいません。';
+    enrolledList.append(empty);
+  }
+  for (const speaker of speakers) {
+    const row = document.createElement('div');
+    row.className = 'enrolledRow';
+    const name = document.createElement('span');
+    name.className = 'enrolledName';
+    name.textContent = speaker.name || '(無名)';
+    const remove = document.createElement('button');
+    remove.textContent = '削除';
+    remove.addEventListener('click', async () => {
+      try {
+        const response = await speakerFetch(`/speakers/${speaker.id}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error(await response.text());
+        status.textContent = `「${speaker.name}」の登録を解除しました。`;
+      } catch (error) {
+        status.textContent = `削除エラー: ${error?.message || error}`;
+      }
+      refreshSpeakerPanel();
+    });
+    row.append(name, remove);
+    enrolledList.append(row);
+  }
+
+  const previousSelection = liveSpeakerSelect.value;
+  liveSpeakerSelect.replaceChildren();
+  const entries = Object.entries(live);
+  if (!entries.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '検出中の話者なし（翻訳中に話し始めると出ます）';
+    liveSpeakerSelect.append(option);
+    liveSpeakerSelect.disabled = true;
+    enrollLiveSpeaker.disabled = true;
+  } else {
+    for (const [index, info] of entries) {
+      const option = document.createElement('option');
+      option.value = index;
+      option.textContent = `話者 ${speakerLetter(Number(index))}（約${info.seconds}秒${info.identified ? '・登録済' : ''}）`;
+      liveSpeakerSelect.append(option);
+    }
+    if (previousSelection !== '' && entries.some(([index]) => index === previousSelection)) {
+      liveSpeakerSelect.value = previousSelection;
+    }
+    liveSpeakerSelect.disabled = !fluidAvailable;
+    enrollLiveSpeaker.disabled = !fluidAvailable;
+  }
+  enrollAudioFile.disabled = !fluidAvailable;
+}
+
+let enrollInFlight = false;
+
+async function refreshSpeakerPanel() {
+  if (enrollInFlight) return;
+  const data = await fetchSpeakers();
+  fluidAvailable = Boolean(data?.matching?.available);
+  if (!data) {
+    speakerEnrollHint.textContent = 'ローカルAIに接続できません。先に「ローカルAI起動」を実行してください。';
+    return;
+  }
+  speakerEnrollHint.textContent = fluidAvailable
+    ? '登録した声が検出されると字幕の「話者A」等が登録名で表示されます。'
+    : '声紋登録は macOS の FluidAudio 環境でのみ利用できます。';
+  renderSpeakers(data);
+}
+
+async function postEnroll(body) {
+  const response = await speakerFetch('/speakers/enroll', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.detail || data?.error || '登録に失敗しました');
+  }
+  return data;
+}
+
+enrollLiveSpeaker.addEventListener('click', async () => {
+  const name = speakerNameInput.value.trim();
+  const index = liveSpeakerSelect.value;
+  if (!name) {
+    status.textContent = '登録する名前を入力してください。';
+    speakerNameInput.focus();
+    return;
+  }
+  if (index === '') {
+    status.textContent = '検出中の話者がありません。翻訳中に話し始めると選択できます。';
+    return;
+  }
+
+  enrollLiveSpeaker.disabled = true;
+  enrollInFlight = true;
+  status.textContent = `話者 ${speakerLetter(Number(index))} の声を学習しています…`;
+  try {
+    await postEnroll({ name, speakerIndex: Number(index) });
+    status.textContent = `「${name}」を登録しました。字幕の話者名が更新されます。`;
+    speakerNameInput.value = '';
+  } catch (error) {
+    status.textContent = `登録エラー: ${error?.message || error}`;
+  } finally {
+    enrollInFlight = false;
+  }
+  refreshSpeakerPanel();
+});
+
+async function fileToPcm16Base64(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const ctx = new AudioContext();
+  const decoded = await ctx.decodeAudioData(arrayBuffer);
+  const length = Math.min(decoded.length, Math.round(60 * decoded.sampleRate));
+  const offline = new OfflineAudioContext(1, Math.ceil((length / decoded.sampleRate) * 16000), 16000);
+  const trimmed = ctx.createBuffer(1, length, decoded.sampleRate);
+  trimmed.copyToChannel(decoded.getChannelData(0).subarray(0, length), 0);
+  const source = offline.createBufferSource();
+  source.buffer = trimmed;
+  source.connect(offline.destination);
+  source.start();
+  const rendered = await offline.startRendering();
+
+  const floats = rendered.getChannelData(0);
+  const pcm = new Int16Array(floats.length);
+  for (let i = 0; i < floats.length; i += 1) {
+    const s = Math.max(-1, Math.min(1, floats[i]));
+    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  const bytes = new Uint8Array(pcm.buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+enrollAudioFile.addEventListener('click', async () => {
+  const name = speakerNameInput.value.trim();
+  const file = speakerAudioFile.files?.[0];
+  if (!name) {
+    status.textContent = '登録する名前を入力してください。';
+    speakerNameInput.focus();
+    return;
+  }
+  if (!file) {
+    status.textContent = '音声ファイルを選択してください。';
+    return;
+  }
+
+  enrollAudioFile.disabled = true;
+  enrollInFlight = true;
+  status.textContent = '音声ファイルから声を学習しています…';
+  try {
+    const audioBase64 = await fileToPcm16Base64(file);
+    await postEnroll({ name, audioBase64 });
+    status.textContent = `「${name}」を登録しました。`;
+    speakerNameInput.value = '';
+    speakerAudioFile.value = '';
+  } catch (error) {
+    status.textContent = `登録エラー: ${error?.message || error}`;
+  } finally {
+    enrollInFlight = false;
+  }
+  refreshSpeakerPanel();
+});
+
+refreshSpeakers.addEventListener('click', refreshSpeakerPanel);
+
+speakerEnrollDetails.addEventListener('toggle', () => {
+  if (speakerEnrollDetails.open) {
+    refreshSpeakerPanel();
+    if (!speakersPoll) speakersPoll = setInterval(refreshSpeakerPanel, 4000);
+  } else if (speakersPoll) {
+    clearInterval(speakersPoll);
+    speakersPoll = null;
+  }
+});
+
+window.addEventListener('unload', () => {
+  if (speakersPoll) clearInterval(speakersPoll);
+});
 
 startButton.addEventListener('click', async () => {
   const settings = readSettings();
