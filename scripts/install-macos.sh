@@ -43,7 +43,7 @@ echo "▶ Installing local routing server..."
 curl -fsSL "$RAW_BASE/local-server/server.py" -o "$SERVER"
 mkdir -p "$APP_DIR/backends"
 for backend_file in __init__.py asr.py runtime.py translation.py; do
-  backend_tmp="$APP_DIR/backends/.$backend_file.tmp"
+  backend_tmp="$(mktemp "$APP_DIR/backends/.${backend_file}.XXXXXX")"
   curl -fsSL "$RAW_BASE/local-server/backends/$backend_file" -o "$backend_tmp"
   mv "$backend_tmp" "$APP_DIR/backends/$backend_file"
 done
