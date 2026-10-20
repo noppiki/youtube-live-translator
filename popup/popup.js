@@ -434,11 +434,39 @@ function speakerLetter(index) {
   return String.fromCharCode(65 + (index % 26));
 }
 
+let speakerTokenCache = null;
+
+async function speakerApiHeaders() {
+  if (speakerTokenCache === null) {
+    try {
+      const response = await sendNative('speakerToken');
+      speakerTokenCache = response?.ok ? String(response.token || '') : '';
+    } catch {
+      speakerTokenCache = '';
+    }
+  }
+  return speakerTokenCache ? { 'X-YTLT-Token': speakerTokenCache } : {};
+}
+
+async function speakerFetch(path, options = {}) {
+  const doFetch = async () => fetch(`http://127.0.0.1:8765${path}`, {
+    ...options,
+    headers: { ...(await speakerApiHeaders()), ...(options.headers || {}) }
+  });
+  let response = await doFetch();
+  if (response.status === 403) {
+    // The token rotates with each server start; refresh once and retry.
+    speakerTokenCache = null;
+    response = await doFetch();
+  }
+  return response;
+}
+
 async function fetchSpeakers() {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
-    const response = await fetch('http://127.0.0.1:8765/speakers', { signal: controller.signal });
+    const response = await speakerFetch('/speakers', { signal: controller.signal });
     clearTimeout(timer);
     if (!response.ok) return null;
     return await response.json();
@@ -468,7 +496,7 @@ function renderSpeakers(data) {
     remove.textContent = '削除';
     remove.addEventListener('click', async () => {
       try {
-        const response = await fetch(`http://127.0.0.1:8765/speakers/${speaker.id}`, { method: 'DELETE' });
+        const response = await speakerFetch(`/speakers/${speaker.id}`, { method: 'DELETE' });
         if (!response.ok) throw new Error(await response.text());
         status.textContent = `「${speaker.name}」の登録を解除しました。`;
       } catch (error) {
@@ -523,7 +551,7 @@ async function refreshSpeakerPanel() {
 }
 
 async function postEnroll(body) {
-  const response = await fetch('http://127.0.0.1:8765/speakers/enroll', {
+  const response = await speakerFetch('/speakers/enroll', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)

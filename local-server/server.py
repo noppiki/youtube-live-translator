@@ -7,6 +7,7 @@ import os
 import time
 import traceback
 import platform
+import secrets
 import struct
 import uuid
 from pathlib import Path
@@ -57,11 +58,33 @@ ENROLL_MAX_BODY_BYTES = 8 * 1024 * 1024
 ENROLL_MAX_AUDIO_BASE64 = int(
     ENROLL_MAX_AUDIO_SECONDS * PCM16_BYTES_PER_SECOND * 4 / 3
 ) + 256
-# Speaker endpoints trust only the extension IDs registered in the Native
-# Messaging host manifest's allowed_origins (installers append new IDs on
-# reinstall). YTLT_EXTENSION_ID adds an explicit override (e.g. dev installs).
+# Speaker endpoints authenticate via SPEAKER_TOKEN handed out through Native
+# Messaging; the host manifest's allowed_origins decides which extensions may
+# reach it. YTLT_EXTENSION_ID adds an explicit trusted ID (e.g. dev installs).
 PINNED_EXTENSION_ID = os.environ.get("YTLT_EXTENSION_ID") or ""
 NATIVE_MANIFEST_NAME = "com.noppiki.youtube_live_translator.json"
+
+# Per-process credential for the speaker API. The extension obtains it via
+# Native Messaging (launcher.py), which Chrome only exposes to extensions
+# listed in the host manifest's allowed_origins — so unlike the forgeable
+# Origin header it actually authenticates the caller. Same-user processes can
+# read APP_DIR anyway; this boundary is about other extensions and web pages.
+SPEAKER_TOKEN = secrets.token_hex(32)
+SPEAKER_TOKEN_FILE = APP_DIR / "speaker.token"
+
+
+def _write_speaker_token() -> None:
+    try:
+        SPEAKER_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SPEAKER_TOKEN_FILE.with_suffix(".tmp")
+        tmp.write_text(SPEAKER_TOKEN)
+        tmp.chmod(0o600)
+        tmp.replace(SPEAKER_TOKEN_FILE)
+    except Exception:
+        pass
+
+
+_write_speaker_token()
 
 EMBEDDING_HELPER = None
 EMBEDDING_HELPER_LOCK = asyncio.Lock()
@@ -166,9 +189,7 @@ def _trusted_extension_ids() -> set:
 
 
 def _is_extension_origin(request: web.Request) -> bool:
-    """Voice enrollment mutates stored voiceprints, so unlike read-only
-    endpoints it requires the Chrome extension Origin header — restricted to
-    the extension IDs the installer registered via Native Messaging."""
+    """Fallback gate for installs with no Native Messaging registration."""
 
     prefix = "chrome-extension://"
     origin = request.headers.get("Origin") or ""
@@ -180,6 +201,18 @@ def _is_extension_origin(request: web.Request) -> bool:
         # origin may call — still excludes non-extension local clients.
         return True
     return origin[len(prefix) :].rstrip("/") in trusted
+
+
+def _speaker_api_authorized(request: web.Request) -> bool:
+    """The token is the credential once Native Messaging is registered; the
+    extension-only Origin check only remains for unregistered dev installs."""
+
+    token = (request.headers.get("X-YTLT-Token") or "").strip()
+    if token and secrets.compare_digest(token, SPEAKER_TOKEN):
+        return True
+    if _trusted_extension_ids():
+        return False
+    return _is_extension_origin(request)
 
 
 def _is_english(language) -> bool:
@@ -471,7 +504,7 @@ async def install_model(request: web.Request):
 
 
 async def list_speakers(request: web.Request):
-    if not _is_extension_origin(request):
+    if not _speaker_api_authorized(request):
         raise web.HTTPForbidden()
 
     identified = LIVE_STREAM.get("identified")
@@ -509,7 +542,7 @@ async def list_speakers(request: web.Request):
 
 
 async def enroll_speaker(request: web.Request):
-    if not _is_extension_origin(request):
+    if not _speaker_api_authorized(request):
         raise web.HTTPForbidden()
     if not RUNTIME.diarization_available:
         raise web.HTTPBadRequest(
@@ -621,7 +654,7 @@ async def enroll_speaker(request: web.Request):
 
 
 async def delete_speaker(request: web.Request):
-    if not _is_extension_origin(request):
+    if not _speaker_api_authorized(request):
         raise web.HTTPForbidden()
 
     speaker_id = request.match_info["speaker_id"]

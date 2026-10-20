@@ -305,6 +305,18 @@ def main() -> None:
                 })
         elif action == "start":
             write_message(ensure_started_windows() if platform.system() == "Windows" else ensure_started_macos())
+        elif action == "speakerToken":
+            # Chrome only reaches this host for extensions listed in the host
+            # manifest's allowed_origins, so returning the server's per-run
+            # credential here hands it exclusively to the intended extension.
+            try:
+                token = (APP_DIR / "speaker.token").read_text(encoding="utf-8").strip()
+            except OSError:
+                token = ""
+            if token:
+                write_message({"ok": True, "token": token})
+            else:
+                write_message({"ok": False, "error": "Local engine is not running or has no speaker token."})
         else:
             write_message({"ok": False, "error": f"Unknown action: {action}"})
     except Exception as exc:
