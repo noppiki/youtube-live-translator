@@ -679,7 +679,14 @@ function profileLabelForOverlay(speaker, profile) {
 function applyEnrolledSpeakerName(message) {
   if (!Number.isInteger(message.speaker)) return;
   const name = String(message.name || '').trim().slice(0, 80);
-  if (!name) return;
+  if (!name) {
+    // Server cleared the enrollment (voice deleted): drop the profile so
+    // captions fall back to the generic speaker label.
+    if (speakerProfiles.delete(message.speaker)) {
+      profileLabelForOverlay(message.speaker, null);
+    }
+    return;
+  }
 
   const profile = {
     name,

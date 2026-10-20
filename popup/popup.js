@@ -480,6 +480,7 @@ function renderSpeakers(data) {
     enrolledList.append(row);
   }
 
+  const previousSelection = liveSpeakerSelect.value;
   liveSpeakerSelect.replaceChildren();
   const entries = Object.entries(live);
   if (!entries.length) {
@@ -496,13 +497,19 @@ function renderSpeakers(data) {
       option.textContent = `話者 ${speakerLetter(Number(index))}（約${info.seconds}秒${info.identified ? '・登録済' : ''}）`;
       liveSpeakerSelect.append(option);
     }
+    if (previousSelection !== '' && entries.some(([index]) => index === previousSelection)) {
+      liveSpeakerSelect.value = previousSelection;
+    }
     liveSpeakerSelect.disabled = !fluidAvailable;
     enrollLiveSpeaker.disabled = !fluidAvailable;
   }
   enrollAudioFile.disabled = !fluidAvailable;
 }
 
+let enrollInFlight = false;
+
 async function refreshSpeakerPanel() {
+  if (enrollInFlight) return;
   const data = await fetchSpeakers();
   fluidAvailable = Boolean(data?.matching?.available);
   if (!data) {
@@ -542,6 +549,7 @@ enrollLiveSpeaker.addEventListener('click', async () => {
   }
 
   enrollLiveSpeaker.disabled = true;
+  enrollInFlight = true;
   status.textContent = `話者 ${speakerLetter(Number(index))} の声を学習しています…`;
   try {
     await postEnroll({ name, speakerIndex: Number(index) });
@@ -549,6 +557,8 @@ enrollLiveSpeaker.addEventListener('click', async () => {
     speakerNameInput.value = '';
   } catch (error) {
     status.textContent = `登録エラー: ${error?.message || error}`;
+  } finally {
+    enrollInFlight = false;
   }
   refreshSpeakerPanel();
 });
@@ -595,6 +605,7 @@ enrollAudioFile.addEventListener('click', async () => {
   }
 
   enrollAudioFile.disabled = true;
+  enrollInFlight = true;
   status.textContent = '音声ファイルから声を学習しています…';
   try {
     const audioBase64 = await fileToPcm16Base64(file);
@@ -604,6 +615,8 @@ enrollAudioFile.addEventListener('click', async () => {
     speakerAudioFile.value = '';
   } catch (error) {
     status.textContent = `登録エラー: ${error?.message || error}`;
+  } finally {
+    enrollInFlight = false;
   }
   refreshSpeakerPanel();
 });

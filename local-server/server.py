@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import base64
+import collections
 import json
 import os
 import time
@@ -47,6 +48,11 @@ SPEAKER_BUFFER_SECONDS = 40.0
 # Seconds of buffered speaker audio at which identification is (re)attempted.
 SPEAKER_IDENTIFY_STEPS = (4.0, 12.0, 25.0)
 PCM16_BYTES_PER_SECOND = 16000 * 2
+# Popup enrollment accepts clips up to 60s; 60s PCM16 + base64 + JSON
+# overhead stays well under this cap.
+ENROLL_MAX_AUDIO_SECONDS = 60
+ENROLL_MAX_BODY_BYTES = 8 * 1024 * 1024
+ENROLL_MAX_AUDIO_BASE64 = 4 * 1024 * 1024
 
 EMBEDDING_HELPER = None
 EMBEDDING_HELPER_LOCK = asyncio.Lock()
@@ -122,6 +128,14 @@ async def embedding_provider() -> "FluidProcess":
 def _allowed_origin(request: web.Request) -> bool:
     origin = request.headers.get("Origin")
     return origin is None or origin.startswith("chrome-extension://")
+
+
+def _is_extension_origin(request: web.Request) -> bool:
+    """Voice enrollment mutates stored voiceprints, so unlike read-only
+    endpoints it requires the Chrome extension Origin header."""
+
+    origin = request.headers.get("Origin") or ""
+    return origin.startswith("chrome-extension://")
 
 
 def _is_english(language) -> bool:
@@ -413,21 +427,23 @@ async def install_model(request: web.Request):
 
 
 async def list_speakers(request: web.Request):
-    if not _allowed_origin(request):
+    if not _is_extension_origin(request):
         raise web.HTTPForbidden()
 
-    live_audio = LIVE_STREAM.get("audio") or {}
     identified = LIVE_STREAM.get("identified")
     if identified is None:
         identified = {}
-    live = {
-        str(index): {
-            "seconds": round(len(buf) / PCM16_BYTES_PER_SECOND, 1),
-            "identified": index in identified,
-        }
-        for index, buf in live_audio.items()
-        if isinstance(index, int) and len(buf) >= PCM16_BYTES_PER_SECOND
-    }
+    seconds_of = LIVE_STREAM.get("seconds_of")
+    indices = LIVE_STREAM.get("indices")
+    live = {}
+    if callable(seconds_of) and callable(indices):
+        for index in indices():
+            seconds = seconds_of(index)
+            if seconds >= 1.0:
+                live[str(index)] = {
+                    "seconds": round(seconds, 1),
+                    "identified": index in identified,
+                }
     return web.json_response(
         {
             "ok": True,
@@ -449,7 +465,7 @@ async def list_speakers(request: web.Request):
 
 
 async def enroll_speaker(request: web.Request):
-    if not _allowed_origin(request):
+    if not _is_extension_origin(request):
         raise web.HTTPForbidden()
     if not RUNTIME.diarization_available:
         raise web.HTTPBadRequest(
@@ -464,8 +480,8 @@ async def enroll_speaker(request: web.Request):
     pcm = b""
     live_index = data.get("speakerIndex")
     if live_index is not None:
-        buf = (LIVE_STREAM.get("audio") or {}).get(int(live_index))
-        pcm = bytes(buf or b"")
+        pcm_for = LIVE_STREAM.get("pcm_for")
+        pcm = pcm_for(int(live_index)) if callable(pcm_for) else b""
         if not pcm:
             raise web.HTTPBadRequest(
                 text="その話者の音声がまだ十分に録れていません。"
@@ -474,6 +490,10 @@ async def enroll_speaker(request: web.Request):
         encoded = data.get("audioBase64")
         if not encoded:
             raise web.HTTPBadRequest(text="音声データがありません。")
+        if len(encoded) > ENROLL_MAX_AUDIO_BASE64:
+            raise web.HTTPBadRequest(
+                text=f"音声は{ENROLL_MAX_AUDIO_SECONDS}秒以内にしてください。"
+            )
         try:
             pcm = base64.b64decode(encoded)
         except Exception:
@@ -481,7 +501,7 @@ async def enroll_speaker(request: web.Request):
 
     if len(pcm) < PCM16_BYTES_PER_SECOND:
         raise web.HTTPBadRequest(text="1秒以上の音声が必要です。")
-    pcm = pcm[-120 * PCM16_BYTES_PER_SECOND :]
+    pcm = pcm[-ENROLL_MAX_AUDIO_SECONDS * PCM16_BYTES_PER_SECOND :]
 
     try:
         helper = await embedding_provider()
@@ -513,44 +533,43 @@ async def enroll_speaker(request: web.Request):
     identified = LIVE_STREAM.get("identified")
     if identified is None:
         identified = {}
-    live_audio = LIVE_STREAM.get("audio") or {}
-    if live_index is not None:
-        identified[int(live_index)] = name
-        stream_ws = LIVE_STREAM.get("ws")
+    stream_ws = LIVE_STREAM.get("ws")
+
+    async def push_speaker_name(index: int, speaker_name: str, distance: float):
         if stream_ws and not stream_ws.closed:
             await stream_ws.send_json(
                 {
                     "type": "speakerName",
-                    "speaker": int(live_index),
-                    "name": name,
-                    "confidence": 0.99,
-                    "distance": 0.0,
+                    "speaker": index,
+                    "name": speaker_name,
+                    "confidence": 0.99 if speaker_name else 0.0,
+                    "distance": round(distance, 3),
                     "source": "voice-enrollment",
                 }
             )
-    for index, buf in live_audio.items():
-        if index in identified or len(buf) < 2 * PCM16_BYTES_PER_SECOND:
-            continue
-        try:
-            candidate = await helper.request_embedding(bytes(buf), timeout=600)
-        except Exception:
-            continue
-        match = match_speaker_name(candidate, speakers)
-        if match:
-            speaker, distance = match
-            identified[index] = speaker["name"]
-            stream_ws = LIVE_STREAM.get("ws")
-            if stream_ws and not stream_ws.closed:
-                await stream_ws.send_json(
-                    {
-                        "type": "speakerName",
-                        "speaker": index,
-                        "name": speaker["name"],
-                        "confidence": 0.99,
-                        "distance": round(distance, 3),
-                        "source": "voice-enrollment",
-                    }
-                )
+
+    pcm_for = LIVE_STREAM.get("pcm_for")
+    indices_fn = LIVE_STREAM.get("indices")
+    if live_index is not None:
+        identified[int(live_index)] = {"id": speaker_id, "name": name}
+        await push_speaker_name(int(live_index), name, 0.0)
+    if callable(pcm_for) and callable(indices_fn):
+        for index in indices_fn():
+            buffered = pcm_for(index)
+            if index in identified or len(buffered) < 2 * PCM16_BYTES_PER_SECOND:
+                continue
+            try:
+                candidate = await helper.request_embedding(buffered, timeout=600)
+            except Exception:
+                continue
+            match = match_speaker_name(candidate, speakers)
+            if match:
+                speaker, distance = match
+                identified[index] = {
+                    "id": speaker.get("id"),
+                    "name": speaker["name"],
+                }
+                await push_speaker_name(index, speaker["name"], distance)
 
     return web.json_response(
         {"ok": True, "speaker": {"id": speaker_id, "name": name}}
@@ -558,7 +577,7 @@ async def enroll_speaker(request: web.Request):
 
 
 async def delete_speaker(request: web.Request):
-    if not _allowed_origin(request):
+    if not _is_extension_origin(request):
         raise web.HTTPForbidden()
 
     speaker_id = request.match_info["speaker_id"]
@@ -567,6 +586,35 @@ async def delete_speaker(request: web.Request):
     if len(remaining) == len(speakers):
         raise web.HTTPNotFound(text="登録済みの話者が見つかりません。")
     save_speakers(remaining)
+
+    # Invalidate live labels produced from the deleted voice so the
+    # overlay falls back to the generic speaker name and re-matching
+    # against the remaining voices becomes possible.
+    identified = LIVE_STREAM.get("identified")
+    if identified:
+        attempts = LIVE_STREAM.get("attempts")
+        if attempts is None:
+            attempts = {}
+        stream_ws = LIVE_STREAM.get("ws")
+        stale = [
+            index
+            for index, value in identified.items()
+            if isinstance(value, dict) and value.get("id") == speaker_id
+        ]
+        for index in stale:
+            identified.pop(index, None)
+            attempts.pop(index, None)
+            if stream_ws and not stream_ws.closed:
+                await stream_ws.send_json(
+                    {
+                        "type": "speakerName",
+                        "speaker": index,
+                        "name": "",
+                        "confidence": 0.0,
+                        "distance": 0.0,
+                        "source": "voice-enrollment",
+                    }
+                )
     return web.json_response({"ok": True})
 
 
@@ -596,20 +644,63 @@ async def stream(request: web.Request):
     configured = False
 
     # Voice-identification state for the current fluid session.
-    speaker_audio = {}
-    identified_speakers = {}
+    # Sortformer reports speaker changes *after* the fact (changeAtMs is the
+    # true boundary), so we keep a timestamped audio log plus the reported
+    # timeline and attribute samples to speakers only on demand.
+    audio_chunks = collections.deque()  # (end_ms, pcm16 bytes)
+    audio_elapsed_ms = [0.0]
+    speaker_timeline = []  # sorted [(changeAtMs, speaker)]
+    identified_speakers = {}  # index -> {"id": enrollment id, "name": str}
     identify_attempts = {}
-    live = {"current": None}
 
-    def buffer_speaker_audio(pcm16: bytes):
-        index = live.get("current")
-        if index is None:
+    def buffer_audio_chunk(pcm16: bytes):
+        chunk_ms = len(pcm16) * 1000 / PCM16_BYTES_PER_SECOND
+        audio_elapsed_ms[0] += chunk_ms
+        audio_chunks.append((audio_elapsed_ms[0], bytes(pcm16)))
+        cutoff = audio_elapsed_ms[0] - (SPEAKER_BUFFER_SECONDS + 5) * 1000
+        while audio_chunks and audio_chunks[0][0] < cutoff:
+            audio_chunks.popleft()
+
+    def record_speaker_point(speaker, change_at_ms):
+        if not isinstance(speaker, int) or not isinstance(change_at_ms, (int, float)):
             return
-        buf = speaker_audio.setdefault(index, bytearray())
-        buf.extend(pcm16)
-        cap = int(SPEAKER_BUFFER_SECONDS * PCM16_BYTES_PER_SECOND)
-        if len(buf) > cap:
-            del buf[: len(buf) - cap]
+        if any(t == change_at_ms and s == speaker for t, s in speaker_timeline):
+            return
+        speaker_timeline.append((change_at_ms, speaker))
+        speaker_timeline.sort()
+        del speaker_timeline[:-64]
+
+    def speaker_at(ms):
+        current = None
+        for change_at, speaker in speaker_timeline:
+            if change_at <= ms:
+                current = speaker
+            else:
+                break
+        return current
+
+    def speaker_pcm(speaker_index, max_seconds=SPEAKER_BUFFER_SECONDS):
+        out = bytearray()
+        for end_ms, data in audio_chunks:
+            midpoint = end_ms - len(data) * 500 / PCM16_BYTES_PER_SECOND
+            if speaker_at(midpoint) == speaker_index:
+                out.extend(data)
+        cap = int(max_seconds * PCM16_BYTES_PER_SECOND)
+        if len(out) > cap:
+            del out[: len(out) - cap]
+        return bytes(out)
+
+    def speaker_seconds(speaker_index):
+        total = sum(
+            len(data)
+            for end_ms, data in audio_chunks
+            if speaker_at(end_ms - len(data) * 500 / PCM16_BYTES_PER_SECOND)
+            == speaker_index
+        )
+        return total / PCM16_BYTES_PER_SECOND
+
+    def live_speaker_indices():
+        return sorted({speaker for _, speaker in speaker_timeline})
 
     async def send_speaker_name(speaker_index: int, name: str, distance: float):
         if not ws.closed:
@@ -618,7 +709,7 @@ async def stream(request: web.Request):
                     "type": "speakerName",
                     "speaker": speaker_index,
                     "name": name,
-                    "confidence": 0.99,
+                    "confidence": 0.99 if name else 0.0,
                     "distance": round(distance, 3),
                     "source": "voice-enrollment",
                 }
@@ -629,7 +720,7 @@ async def stream(request: web.Request):
 
         if speaker_index in identified_speakers:
             return
-        pcm = bytes(speaker_audio.get(speaker_index) or b"")
+        pcm = speaker_pcm(speaker_index)
         if len(pcm) < 2 * PCM16_BYTES_PER_SECOND:
             return
         try:
@@ -640,13 +731,16 @@ async def stream(request: web.Request):
         match = match_speaker_name(embedding)
         if match:
             speaker, distance = match
-            identified_speakers[speaker_index] = speaker["name"]
+            identified_speakers[speaker_index] = {
+                "id": speaker.get("id"),
+                "name": speaker["name"],
+            }
             await send_speaker_name(speaker_index, speaker["name"], distance)
 
     def maybe_identify(speaker_index):
         if speaker_index in identified_speakers:
             return
-        buffered_sec = len(speaker_audio.get(speaker_index) or b"") / PCM16_BYTES_PER_SECOND
+        buffered_sec = speaker_seconds(speaker_index)
         step = identify_attempts.get(speaker_index, 0)
         if step < len(SPEAKER_IDENTIFY_STEPS) and buffered_sec >= SPEAKER_IDENTIFY_STEPS[step]:
             identify_attempts[speaker_index] = step + 1
@@ -661,7 +755,7 @@ async def stream(request: web.Request):
             if kind == "debug":
                 continue
             if kind == "speaker":
-                live["current"] = message.get("speaker")
+                record_speaker_point(message.get("speaker"), message.get("changeAtMs"))
             if not ws.closed:
                 await ws.send_json(message)
 
@@ -699,8 +793,11 @@ async def stream(request: web.Request):
             fluid_pump = asyncio.create_task(pump_fluid())
             configured = True
             LIVE_STREAM["fluid"] = fluid
-            LIVE_STREAM["audio"] = speaker_audio
+            LIVE_STREAM["pcm_for"] = speaker_pcm
+            LIVE_STREAM["seconds_of"] = speaker_seconds
+            LIVE_STREAM["indices"] = live_speaker_indices
             LIVE_STREAM["identified"] = identified_speakers
+            LIVE_STREAM["attempts"] = identify_attempts
             LIVE_STREAM["ws"] = ws
             await ws.send_json(
                 {
@@ -779,9 +876,10 @@ async def stream(request: web.Request):
 
                 if backend == "fluid":
                     await fluid.send_audio(bytes(msg.data))
-                    buffer_speaker_audio(bytes(msg.data))
-                    if live.get("current") is not None:
-                        maybe_identify(live["current"])
+                    buffer_audio_chunk(bytes(msg.data))
+                    current = speaker_at(audio_elapsed_ms[0])
+                    if current is not None:
+                        maybe_identify(current)
                     continue
 
                 audio_buffer.extend(msg.data)
@@ -836,8 +934,11 @@ async def stream(request: web.Request):
             await fluid.close()
 
         LIVE_STREAM["fluid"] = None
-        LIVE_STREAM["audio"] = {}
+        LIVE_STREAM["pcm_for"] = None
+        LIVE_STREAM["seconds_of"] = None
+        LIVE_STREAM["indices"] = None
         LIVE_STREAM["identified"] = {}
+        LIVE_STREAM["attempts"] = {}
         LIVE_STREAM["ws"] = None
 
         if fluid_pump:
@@ -848,7 +949,7 @@ async def stream(request: web.Request):
     return ws
 
 
-app = web.Application()
+app = web.Application(client_max_size=ENROLL_MAX_BODY_BYTES)
 app.router.add_get("/health", health)
 app.router.add_get("/models", models)
 app.router.add_post("/models/install", install_model)
