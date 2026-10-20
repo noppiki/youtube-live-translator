@@ -84,8 +84,6 @@ def _write_speaker_token() -> None:
         pass
 
 
-_write_speaker_token()
-
 EMBEDDING_HELPER = None
 EMBEDDING_HELPER_LOCK = asyncio.Lock()
 # Refreshed while a fluid streaming session is configured so the REST API can
@@ -173,10 +171,11 @@ def _native_manifest_paths():
     ]
 
 
-def _trusted_extension_ids() -> set:
+def _manifest_extension_ids() -> set:
+    """Extension IDs registered in the Native Messaging host manifest — the
+    only ones that can reach the token through the launcher."""
+
     ids = set()
-    if PINNED_EXTENSION_ID:
-        ids.add(PINNED_EXTENSION_ID)
     for path in _native_manifest_paths():
         try:
             manifest = json.loads(path.read_text("utf-8"))
@@ -185,6 +184,13 @@ def _trusted_extension_ids() -> set:
         for origin in manifest.get("allowed_origins") or []:
             if isinstance(origin, str) and origin.startswith("chrome-extension://"):
                 ids.add(origin.rstrip("/")[len("chrome-extension://") :])
+    return ids
+
+
+def _trusted_extension_ids() -> set:
+    ids = _manifest_extension_ids()
+    if PINNED_EXTENSION_ID:
+        ids.add(PINNED_EXTENSION_ID)
     return ids
 
 
@@ -204,13 +210,15 @@ def _is_extension_origin(request: web.Request) -> bool:
 
 
 def _speaker_api_authorized(request: web.Request) -> bool:
-    """The token is the credential once Native Messaging is registered; the
-    extension-only Origin check only remains for unregistered dev installs."""
+    """The token is the credential once Native Messaging is registered (it is
+    the only channel that can deliver the token). Without a manifest, fall
+    back to the extension-Origin check so a pinned dev ID or any extension
+    origin keeps working."""
 
     token = (request.headers.get("X-YTLT-Token") or "").strip()
     if token and secrets.compare_digest(token, SPEAKER_TOKEN):
         return True
-    if _trusted_extension_ids():
+    if _manifest_extension_ids():
         return False
     return _is_extension_origin(request)
 
@@ -1040,6 +1048,23 @@ async def stream(request: web.Request):
 
 
 app = web.Application(client_max_size=ENROLL_MAX_BODY_BYTES)
+
+# Publish the token lazily on the first request: a duplicate launch that
+# fails to bind never sees traffic, so it cannot clobber the running
+# server's credential file.
+_speaker_token_published = False
+
+
+@web.middleware
+async def _publish_speaker_token(request, handler):
+    global _speaker_token_published
+    if not _speaker_token_published:
+        _write_speaker_token()
+        _speaker_token_published = True
+    return await handler(request)
+
+
+app.middlewares.append(_publish_speaker_token)
 app.router.add_get("/health", health)
 app.router.add_get("/models", models)
 app.router.add_post("/models/install", install_model)
