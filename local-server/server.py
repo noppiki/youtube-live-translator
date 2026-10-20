@@ -57,11 +57,11 @@ ENROLL_MAX_BODY_BYTES = 8 * 1024 * 1024
 ENROLL_MAX_AUDIO_BASE64 = int(
     ENROLL_MAX_AUDIO_SECONDS * PCM16_BYTES_PER_SECOND * 4 / 3
 ) + 256
-# First extension origin to touch the speaker API is pinned here so other
-# extensions cannot overwrite enrolled voiceprints (TOFU; override with
-# YTLT_EXTENSION_ID).
-TRUSTED_EXTENSION_FILE = APP_DIR / "extension.id"
+# Speaker endpoints trust only the extension IDs registered in the Native
+# Messaging host manifest's allowed_origins (installers append new IDs on
+# reinstall). YTLT_EXTENSION_ID adds an explicit override (e.g. dev installs).
 PINNED_EXTENSION_ID = os.environ.get("YTLT_EXTENSION_ID") or ""
+NATIVE_MANIFEST_NAME = "com.noppiki.youtube_live_translator.json"
 
 EMBEDDING_HELPER = None
 EMBEDDING_HELPER_LOCK = asyncio.Lock()
@@ -139,30 +139,47 @@ def _allowed_origin(request: web.Request) -> bool:
     return origin is None or origin.startswith("chrome-extension://")
 
 
+def _native_manifest_paths():
+    home = Path.home()
+    return [
+        APP_DIR / "native" / NATIVE_MANIFEST_NAME,
+        home / "Library/Application Support/Google/Chrome/NativeMessagingHosts" / NATIVE_MANIFEST_NAME,
+        home / ".config/google-chrome/NativeMessagingHosts" / NATIVE_MANIFEST_NAME,
+        home / ".config/chromium/NativeMessagingHosts" / NATIVE_MANIFEST_NAME,
+        home / ".config/microsoft-edge/NativeMessagingHosts" / NATIVE_MANIFEST_NAME,
+    ]
+
+
+def _trusted_extension_ids() -> set:
+    ids = set()
+    if PINNED_EXTENSION_ID:
+        ids.add(PINNED_EXTENSION_ID)
+    for path in _native_manifest_paths():
+        try:
+            manifest = json.loads(path.read_text("utf-8"))
+        except Exception:
+            continue
+        for origin in manifest.get("allowed_origins") or []:
+            if isinstance(origin, str) and origin.startswith("chrome-extension://"):
+                ids.add(origin.rstrip("/")[len("chrome-extension://") :])
+    return ids
+
+
 def _is_extension_origin(request: web.Request) -> bool:
     """Voice enrollment mutates stored voiceprints, so unlike read-only
-    endpoints it requires the Chrome extension Origin header — pinned to the
-    first extension that used the API so other extensions cannot call it."""
+    endpoints it requires the Chrome extension Origin header — restricted to
+    the extension IDs the installer registered via Native Messaging."""
 
     prefix = "chrome-extension://"
     origin = request.headers.get("Origin") or ""
     if not origin.startswith(prefix):
         return False
-    extension_id = origin[len(prefix) :]
-    if PINNED_EXTENSION_ID:
-        return extension_id == PINNED_EXTENSION_ID
-    try:
-        trusted = TRUSTED_EXTENSION_FILE.read_text().strip()
-    except Exception:
-        trusted = ""
-    if trusted:
-        return extension_id == trusted
-    try:
-        TRUSTED_EXTENSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-        TRUSTED_EXTENSION_FILE.write_text(extension_id)
-    except Exception:
-        pass
-    return True
+    trusted = _trusted_extension_ids()
+    if not trusted:
+        # Native Messaging was never registered (e.g. dev box): any extension
+        # origin may call — still excludes non-extension local clients.
+        return True
+    return origin[len(prefix) :].rstrip("/") in trusted
 
 
 def _is_english(language) -> bool:
@@ -777,9 +794,14 @@ async def stream(request: web.Request):
             return
         buffered_sec = speaker_seconds(speaker_index)
         step = identify_attempts.get(speaker_index, 0)
-        if step < len(SPEAKER_IDENTIFY_STEPS) and buffered_sec >= SPEAKER_IDENTIFY_STEPS[step]:
-            identify_attempts[speaker_index] = step + 1
-            asyncio.create_task(identify_speaker(speaker_index))
+        if step >= len(SPEAKER_IDENTIFY_STEPS) or buffered_sec < SPEAKER_IDENTIFY_STEPS[step]:
+            return
+        # Only consume an attempt when enough in-window audio exists to
+        # embed — otherwise a sparse speaker burns attempts on empty turns.
+        if len(speaker_pcm(speaker_index)) < 2 * PCM16_BYTES_PER_SECOND:
+            return
+        identify_attempts[speaker_index] = step + 1
+        asyncio.create_task(identify_speaker(speaker_index))
 
     async def pump_fluid():
         while fluid:
