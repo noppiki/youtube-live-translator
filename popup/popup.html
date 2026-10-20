@@ -64,6 +64,29 @@
       <p class="hint" id="speakerNameInferenceHint">Chrome内蔵AIが使える場合は、会話・配信タイトル・概要欄から推定します。低確信度では名前を断定しません。</p>
       <button id="prepareSpeakerAI">名前推定AIを準備</button>
 
+      <details id="speakerEnrollDetails">
+        <summary>話者名を登録（声の学習）</summary>
+        <p class="hint" id="speakerEnrollHint">登録した声が検出されると字幕の「話者A」等が登録名で表示されます。macOS の FluidAudio 環境のみ利用できます。</p>
+        <div id="enrolledList" class="enrolledList"></div>
+        <label>
+          名前
+          <input id="speakerNameInput" autocomplete="off" placeholder="例: 配信者の名前">
+        </label>
+        <label>
+          検出中の話者から登録
+          <select id="liveSpeakerSelect"></select>
+        </label>
+        <label>
+          または音声ファイルから登録（1〜60秒）
+          <input id="speakerAudioFile" type="file" accept="audio/*">
+        </label>
+        <div class="localActions">
+          <button id="enrollLiveSpeaker" class="secondary">話者から登録</button>
+          <button id="enrollAudioFile">ファイルから登録</button>
+          <button id="refreshSpeakers">更新</button>
+        </div>
+      </details>
+
       <div class="localActions">
         <button id="startLocal" class="secondary">ローカルAI起動</button>
         <button id="testLocal">接続テスト</button>

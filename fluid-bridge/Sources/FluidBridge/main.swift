@@ -4,6 +4,7 @@ import Foundation
 
 struct BridgeConfig: Decodable {
     var diarization: Bool = false
+    var embeddingOnly: Bool = false
 }
 
 struct Output: Encodable {
@@ -18,6 +19,8 @@ struct Output: Encodable {
     var tokenStrings: [String]? = nil
     var tokenTimestampsMs: [Int]? = nil
     var message: String? = nil
+    var requestId: Int? = nil
+    var embedding: [Float]? = nil
 }
 
 final class JSONWriter: @unchecked Sendable {
@@ -95,6 +98,7 @@ actor Engine {
     private let writer: JSONWriter
     private var manager: StreamingEouAsrManager?
     private var speakers: SpeakerTracker?
+    private var embedder: DiarizerManager?
     private var configured = false
 
     private var elapsedSamples = 0
@@ -108,6 +112,12 @@ actor Engine {
 
     func configure(_ config: BridgeConfig) async throws {
         guard !configured else { return }
+
+        if config.embeddingOnly {
+            configured = true
+            writer.send(Output(type: "ready"))
+            return
+        }
 
         let asr = StreamingEouAsrManager(
             chunkSize: .ms320,
@@ -133,6 +143,68 @@ actor Engine {
 
         configured = true
         writer.send(Output(type: "ready"))
+    }
+
+    /// Lazily load the WeSpeaker embedding model for voice enrollment.
+    /// Kept separate from the Sortformer tracker so enrollment also works
+    /// when live diarization is off (e.g. registering a voice from a file).
+    private func ensureEmbedder() async throws -> DiarizerManager {
+        if let embedder { return embedder }
+        let models = try await DiarizerModels.downloadIfNeeded()
+        let manager = DiarizerManager()
+        manager.initialize(models: models)
+        embedder = manager
+        return manager
+    }
+
+    func prepareEmbedder() async {
+        do {
+            _ = try await ensureEmbedder()
+            writer.send(Output(type: "embeddingReady"))
+        } catch {
+            writer.send(
+                Output(
+                    type: "embeddingError",
+                    message: error.localizedDescription
+                )
+            )
+        }
+    }
+
+    func extractEmbedding(requestId: Int, pcm data: Data) async {
+        do {
+            let manager = try await ensureEmbedder()
+            let samples: [Float] = data.withUnsafeBytes { raw in
+                let ints = raw.bindMemory(to: Int16.self)
+                return ints.map { Float(Int16(littleEndian: $0)) / 32768.0 }
+            }
+            guard samples.count >= 16_000 else {
+                writer.send(
+                    Output(
+                        type: "embeddingError",
+                        message: "Need at least 1s of audio for a voice embedding.",
+                        requestId: requestId
+                    )
+                )
+                return
+            }
+            let embedding = try manager.extractSpeakerEmbedding(from: samples)
+            writer.send(
+                Output(
+                    type: "embedding",
+                    requestId: requestId,
+                    embedding: embedding
+                )
+            )
+        } catch {
+            writer.send(
+                Output(
+                    type: "embeddingError",
+                    message: error.localizedDescription,
+                    requestId: requestId
+                )
+            )
+        }
     }
 
     private static func pcmBuffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
@@ -352,6 +424,29 @@ struct FluidBridge {
 
                 case 2:
                     await engine.finalize()
+
+                case 3:
+                    guard payload.count >= 4 else {
+                        writer.send(
+                            Output(
+                                type: "embeddingError",
+                                message: "Embedding request missing request id"
+                            )
+                        )
+                        break
+                    }
+                    let requestId = Int(
+                        payload.prefix(4).withUnsafeBytes { raw -> UInt32 in
+                            raw.loadUnaligned(as: UInt32.self).littleEndian
+                        }
+                    )
+                    await engine.extractEmbedding(
+                        requestId: requestId,
+                        pcm: Data(payload.dropFirst(4))
+                    )
+
+                case 4:
+                    await engine.prepareEmbedder()
 
                 default:
                     writer.send(

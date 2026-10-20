@@ -57,3 +57,20 @@ button:disabled { opacity: .5; cursor: default; }
 summary { cursor:pointer; margin-top:10px; font-size:12px; font-weight:700; }
 details textarea { margin:8px 0; }
 code { font-size: 10px; }
+.enrolledList { display:grid; gap:5px; margin:8px 0; }
+.enrolledRow {
+  display:grid;
+  grid-template-columns:1fr auto;
+  align-items:center;
+  gap:8px;
+  font-size:12px;
+  padding:5px 8px;
+  border-radius:8px;
+  background: color-mix(in srgb, CanvasText 6%, Canvas);
+}
+.enrolledRow .enrolledName { font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.enrolledRow button {
+  width:auto; min-height:0; padding:2px 9px; font-size:11px; border-radius:7px;
+}
+.enrolledEmpty { font-size:11px; opacity:.6; margin:4px 0; }
+input[type="file"] { min-height:0; padding:6px; font-size:12px; }
