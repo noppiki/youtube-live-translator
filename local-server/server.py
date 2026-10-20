@@ -1048,23 +1048,6 @@ async def stream(request: web.Request):
 
 
 app = web.Application(client_max_size=ENROLL_MAX_BODY_BYTES)
-
-# Publish the token lazily on the first request: a duplicate launch that
-# fails to bind never sees traffic, so it cannot clobber the running
-# server's credential file.
-_speaker_token_published = False
-
-
-@web.middleware
-async def _publish_speaker_token(request, handler):
-    global _speaker_token_published
-    if not _speaker_token_published:
-        _write_speaker_token()
-        _speaker_token_published = True
-    return await handler(request)
-
-
-app.middlewares.append(_publish_speaker_token)
 app.router.add_get("/health", health)
 app.router.add_get("/models", models)
 app.router.add_post("/models/install", install_model)
@@ -1074,5 +1057,21 @@ app.router.add_get("/speakers", list_speakers)
 app.router.add_post("/speakers/enroll", enroll_speaker)
 app.router.add_delete("/speakers/{speaker_id}", delete_speaker)
 
+def _port_free() -> bool:
+    import socket
+
+    try:
+        with socket.create_connection((HOST, PORT), timeout=0.25):
+            return False
+    except OSError:
+        return True
+
+
 if __name__ == "__main__":
+    # Publish the token just before binding, and only when the port is free:
+    # the native launcher can then always read a credential matching the
+    # running server, and a duplicate launch that fails to bind cannot
+    # clobber it.
+    if _port_free():
+        _write_speaker_token()
     web.run_app(app, host=HOST, port=PORT, access_log=None)
