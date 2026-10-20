@@ -52,7 +52,16 @@ PCM16_BYTES_PER_SECOND = 16000 * 2
 # overhead stays well under this cap.
 ENROLL_MAX_AUDIO_SECONDS = 60
 ENROLL_MAX_BODY_BYTES = 8 * 1024 * 1024
-ENROLL_MAX_AUDIO_BASE64 = 4 * 1024 * 1024
+# Matches exactly 60s of PCM16 (with a small slack), so an oversized clip is
+# rejected before decoding instead of being silently trimmed.
+ENROLL_MAX_AUDIO_BASE64 = int(
+    ENROLL_MAX_AUDIO_SECONDS * PCM16_BYTES_PER_SECOND * 4 / 3
+) + 256
+# First extension origin to touch the speaker API is pinned here so other
+# extensions cannot overwrite enrolled voiceprints (TOFU; override with
+# YTLT_EXTENSION_ID).
+TRUSTED_EXTENSION_FILE = APP_DIR / "extension.id"
+PINNED_EXTENSION_ID = os.environ.get("YTLT_EXTENSION_ID") or ""
 
 EMBEDDING_HELPER = None
 EMBEDDING_HELPER_LOCK = asyncio.Lock()
@@ -132,10 +141,28 @@ def _allowed_origin(request: web.Request) -> bool:
 
 def _is_extension_origin(request: web.Request) -> bool:
     """Voice enrollment mutates stored voiceprints, so unlike read-only
-    endpoints it requires the Chrome extension Origin header."""
+    endpoints it requires the Chrome extension Origin header — pinned to the
+    first extension that used the API so other extensions cannot call it."""
 
+    prefix = "chrome-extension://"
     origin = request.headers.get("Origin") or ""
-    return origin.startswith("chrome-extension://")
+    if not origin.startswith(prefix):
+        return False
+    extension_id = origin[len(prefix) :]
+    if PINNED_EXTENSION_ID:
+        return extension_id == PINNED_EXTENSION_ID
+    try:
+        trusted = TRUSTED_EXTENSION_FILE.read_text().strip()
+    except Exception:
+        trusted = ""
+    if trusted:
+        return extension_id == trusted
+    try:
+        TRUSTED_EXTENSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TRUSTED_EXTENSION_FILE.write_text(extension_id)
+    except Exception:
+        pass
+    return True
 
 
 def _is_english(language) -> bool:
@@ -649,6 +676,10 @@ async def stream(request: web.Request):
     # timeline and attribute samples to speakers only on demand.
     audio_chunks = collections.deque()  # (end_ms, pcm16 bytes)
     audio_elapsed_ms = [0.0]
+    # Bytes attributed to each speaker that have already expired out of
+    # audio_chunks — lets sparse speakers accumulate toward the threshold
+    # across turns separated by >SPEAKER_BUFFER_SECONDS of silence.
+    expired_speaker_bytes = collections.Counter()
     speaker_timeline = []  # sorted [(changeAtMs, speaker)]
     identified_speakers = {}  # index -> {"id": enrollment id, "name": str}
     identify_attempts = {}
@@ -659,7 +690,10 @@ async def stream(request: web.Request):
         audio_chunks.append((audio_elapsed_ms[0], bytes(pcm16)))
         cutoff = audio_elapsed_ms[0] - (SPEAKER_BUFFER_SECONDS + 5) * 1000
         while audio_chunks and audio_chunks[0][0] < cutoff:
-            audio_chunks.popleft()
+            end_ms, data = audio_chunks.popleft()
+            owner = speaker_at(end_ms - len(data) * 500 / PCM16_BYTES_PER_SECOND)
+            if owner is not None:
+                expired_speaker_bytes[owner] += len(data)
 
     def record_speaker_point(speaker, change_at_ms):
         if not isinstance(speaker, int) or not isinstance(change_at_ms, (int, float)):
@@ -691,7 +725,8 @@ async def stream(request: web.Request):
         return bytes(out)
 
     def speaker_seconds(speaker_index):
-        total = sum(
+        total = expired_speaker_bytes.get(speaker_index, 0)
+        total += sum(
             len(data)
             for end_ms, data in audio_chunks
             if speaker_at(end_ms - len(data) * 500 / PCM16_BYTES_PER_SECOND)
