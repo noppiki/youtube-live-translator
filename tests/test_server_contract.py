@@ -9,6 +9,17 @@ def test_server_does_not_import_mlx_at_module_load():
     assert "from mlx_lm import" not in SERVER_SOURCE
 
 
+def test_translation_pair_comes_from_the_language_table():
+    assert "pair_supported" in SERVER_SOURCE
+    assert "HEALTH_SOURCE_CODES" in SERVER_SOURCE
+    assert "MLX_REPO" in SERVER_SOURCE
+    assert "GGUF_SHORT" in SERVER_SOURCE
+    assert "supported_sources" not in SERVER_SOURCE
+    assert '["en", "ko", "zh", "es", "fr", "de"]' not in SERVER_SOURCE
+    assert "DreamFoundries" not in SERVER_SOURCE
+    assert "gemma" not in SERVER_SOURCE.lower()
+
+
 def test_server_keeps_public_routes_and_health_metadata_keys():
     assert 'app.router.add_get("/health", health)' in SERVER_SOURCE
     assert 'app.router.add_get("/models", models)' in SERVER_SOURCE

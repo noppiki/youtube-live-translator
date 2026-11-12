@@ -35,3 +35,5 @@ def test_health_payload_reports_mocked_windows_capabilities(monkeypatch):
     assert payload["accelerator"] == "cpu"
     assert payload["diarizationAvailable"] is False
     assert payload["fluidAudio"]["available"] is False
+    assert payload["translation"]["toJapanese"] == ["en", "ko", "zh", "es", "fr", "de"]
+    assert payload["translation"]["endpoint"] == "http://127.0.0.1:8766"

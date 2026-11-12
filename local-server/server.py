@@ -21,6 +21,7 @@ from backends import (
     create_translation_backend,
     runtime_metadata,
 )
+from backends.translation import GGUF_SHORT, HEALTH_SOURCE_CODES, MLX_REPO, pair_supported
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("YTLT_PORT", "8765"))
@@ -29,9 +30,7 @@ FLUID_BRIDGE = Path(os.environ.get("YTLT_FLUID_BRIDGE", APP_DIR / "bin/fluid-bri
 RUNTIME = runtime_metadata(fluid_bridge=FLUID_BRIDGE)
 TRANSLATION_MODEL = os.environ.get(
     "YTLT_TRANSLATION_MODEL",
-    "DreamFoundries/gemma-4-E4B-it-4bit"
-    if RUNTIME.translation_backend == "mlx"
-    else "gemma-4-E4B-it-qat-q4_0",
+    MLX_REPO if RUNTIME.translation_backend == "mlx" else GGUF_SHORT,
 )
 ASR_BACKEND = create_asr_backend(RUNTIME)
 TRANSLATION_BACKEND = create_translation_backend(RUNTIME, TRANSLATION_MODEL)
@@ -247,8 +246,7 @@ async def translate(request: web.Request):
 
     if not text:
         return web.json_response({"ok": True, "translated": ""})
-    supported_sources = {"en", "english", "en-us", "en-gb", "ko", "kr", "zh", "zh-cn", "zh-tw", "es", "fr", "de"}
-    if source not in supported_sources or target != "ja":
+    if not pair_supported(source, target):
         raise web.HTTPBadRequest(text="Local smart translation supports English/Korean/Chinese/Spanish/French/German → Japanese.")
 
     translated = await TRANSLATION_BACKEND.translate(
@@ -447,7 +445,7 @@ def build_health_payload() -> dict[str, object]:
             "loaded": TRANSLATION_BACKEND.loaded,
             "backend": RUNTIME.translation_backend,
             "endpoint": getattr(TRANSLATION_BACKEND, "url", None),
-            "toJapanese": ["en", "ko", "zh", "es", "fr", "de"],
+            "toJapanese": list(HEALTH_SOURCE_CODES),
         },
         "fluidAudio": {
             "available": RUNTIME.diarization_available,
