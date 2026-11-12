@@ -9,7 +9,7 @@ param(
     [string]$SourceRoot = "",
     [string]$RawBase = "https://raw.githubusercontent.com/noppiki/youtube-live-translator/main",
     [string]$InstallDirectory = "",
-    [string]$TranslationModelRepo = "google/gemma-4-E4B-it-qat-q4_0-gguf"
+    [string]$TranslationModelRepo = "pfnet/plamo-3-translate-2b-GGUF"
 )
 
 $ErrorActionPreference = "Stop"
@@ -285,16 +285,16 @@ function Install-LlamaRuntime([string]$RuntimeDirectory, [string]$Accelerator) {
 
 
 function Prepare-TranslationModel([string]$Python, [string]$ModelDirectory) {
-    Write-Step "Preparing Gemma 4 E4B Q4_0 translation model"
+    Write-Step "Preparing PLaMo 3 Translate 2B Q4_K_M"
     Ensure-Directory $ModelDirectory
     $download = @"
 from huggingface_hub import snapshot_download
 snapshot_download(
     repo_id='$TranslationModelRepo',
     local_dir=r'$ModelDirectory',
-    allow_patterns=['*q4_0*.gguf', '*.json'],
+    allow_patterns=['plamo-3-translate-2b-Q4_K_M.gguf'],
 )
-print('Gemma model ready.')
+print('PLaMo 3 Translate model ready.')
 "@
     Invoke-PythonScript $Python $download | Out-Null
 }
@@ -367,7 +367,7 @@ $NativeHost = Join-Path $NativeDirectory "ytlt-native-host.exe"
 $ManifestPath = Join-Path $NativeDirectory "com.noppiki.youtube_live_translator.json"
 $StartupScript = Join-Path $AppDir "start-windows.ps1"
 $RuntimeDirectory = Join-Path $AppDir "llama-cpp"
-$ModelDirectory = Join-Path $AppDir "models\gemma-4-E4B-it-qat-q4_0-gguf"
+$ModelDirectory = Join-Path $AppDir "models\plamo-3-translate-2b-GGUF"
 
 Write-Host "YouTube Live Translator Windows local engine"
 Write-Host "Install directory: $AppDir"
@@ -456,7 +456,7 @@ Write-Host ""
 Write-Host "✓ Windows local engine installed/updated."
 Write-Host "  Local API: http://127.0.0.1:8765"
 Write-Host "  ASR: Qwen3-ASR 0.6B (Transformers)"
-Write-Host "  Translation: Gemma 4 E4B via llama.cpp at http://127.0.0.1:8766"
+Write-Host "  Translation: PLaMo 3 Translate 2B via llama.cpp at http://127.0.0.1:8766"
 Write-Host "  App directory: $AppDir"
 if ($ExtensionId) { Write-Host "  Native Messaging: registered for $ExtensionId" }
 Write-Host "Reload the Chrome extension, then press 'ローカルAI起動'."
