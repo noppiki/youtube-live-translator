@@ -1,76 +1,294 @@
-"""Translation backend adapters for MLX and llama.cpp OpenAI-compatible APIs."""
+"""PFML3 prompts for PLaMo 3 Translate, completed by MLX or llama.cpp."""
 
 from __future__ import annotations
 
 import asyncio
 import os
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-TRANSLATION_SYSTEM = """You translate live-stream captions into concise, natural Japanese subtitles.
-Use recent dialogue only as context. Translate CURRENT only.
-Output Japanese only. Do not leave Korean, Chinese, Spanish, French, German, or other source-language words in the output unless they are proper names, product names, model names, acronyms, or glossary-preserved terms.
-Preserve person names, product names, model names, acronyms, and technical terms in Latin script unless the glossary explicitly specifies a Japanese form.
-Follow the glossary exactly.
-Do not explain or add notes.
-Prefer natural spoken Japanese over literal wording.
-Never drop meaning, negation, numbers, measurement units, or currency units.
-If a number has a unit in the source, keep the unit in Japanese in the translation."""
+MLX_REPO = "pfnet/plamo-3-translate-2b-MLX-4bit"
+GGUF_REPO = "pfnet/plamo-3-translate-2b-GGUF"
+GGUF_FILE = "plamo-3-translate-2b-Q4_K_M.gguf"
+GGUF_DIR = "plamo-3-translate-2b-GGUF"
+GGUF_SHORT = "plamo-3-translate-2b-Q4_K_M"
+
+TEMPERATURE = 0.0
+MAX_TOKENS = 96
+OUTPUT_FORM = "plain"
+CONTEXT_TURNS = 3
+PRESERVE_PREFIX = "Terms to leave unchanged: "
+_STOP_MARKERS = ("<|plamo:tag|>", "<|plamo:bos|>")
+_CONTROL_TOKENS = _STOP_MARKERS + (
+    "<|plamo:msg|>",
+    "<|plamo:key|>",
+    "<|plamo:val|>",
+    "<|plamo:index|>",
+    "<|plamo:item|>",
+)
+_SPEAKER_PREFIXES = ("A:", "B:", "C:", "D:")
+_UNSUPPORTED_PAIR = (
+    "Local smart translation supports English/Korean/Chinese/Spanish/French/German → Japanese."
+)
 
 
-def build_translation_messages(
+@dataclass(frozen=True)
+class SourceLanguage:
+    """One source the local route accepts, and the PLaMo code the prompt receives."""
+
+    plamo: str
+    aliases: frozenset[str]
+    health_code: str | None
+
+
+SOURCE_LANGUAGES: tuple[SourceLanguage, ...] = (
+    SourceLanguage("en", frozenset({"en", "english", "en-us", "en-gb"}), "en"),
+    SourceLanguage("ko", frozenset({"ko", "kr"}), "ko"),
+    SourceLanguage("zh-hans", frozenset({"zh", "zh-cn", "zh-hans"}), "zh"),
+    SourceLanguage("zh-hant", frozenset({"zh-tw", "zh-hant"}), None),
+    SourceLanguage("es", frozenset({"es"}), "es"),
+    SourceLanguage("fr", frozenset({"fr"}), "fr"),
+    SourceLanguage("de", frozenset({"de"}), "de"),
+)
+
+
+def _alias_map(languages: tuple[SourceLanguage, ...]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for language in languages:
+        for alias in language.aliases:
+            key = alias.strip().lower()
+            if key in mapping:
+                raise RuntimeError(f"duplicate source alias {key}")
+            mapping[key] = language.plamo
+    return mapping
+
+
+def _health_codes(languages: tuple[SourceLanguage, ...]) -> tuple[str, ...]:
+    codes: list[str] = []
+    for language in languages:
+        code = language.health_code
+        if code and code not in codes:
+            codes.append(code)
+    return tuple(codes)
+
+
+_ALIAS_TO_PLAMO = _alias_map(SOURCE_LANGUAGES)
+HEALTH_SOURCE_CODES = _health_codes(SOURCE_LANGUAGES)
+
+
+@dataclass(frozen=True)
+class GlossaryPair:
+    """An explicit `src => tgt` line. A bare term is not a pair."""
+
+    source: str
+    target: str
+
+
+@dataclass(frozen=True)
+class Pfml3Prompt:
+    """One completion prompt. `build_pfml3` is the constructor callers use."""
+
+    text: str
+
+    def __post_init__(self) -> None:
+        if "\n" in self.text or "\r" in self.text:
+            raise ValueError("PFML3 prompt must be a single line")
+        if self.text.startswith("<|plamo:bos|>"):
+            raise ValueError("PFML3 prompt must not include the bos token")
+        if not self.text.startswith("<|plamo:tag|>dataset<|plamo:msg|>translation"):
+            raise ValueError("PFML3 prompt must start with dataset=translation")
+        if not self.text.endswith("<|plamo:msg|>"):
+            raise ValueError("PFML3 prompt must end with an empty output message")
+
+
+def _plamo_source(source: str) -> str | None:
+    return _ALIAS_TO_PLAMO.get(str(source).strip().lower())
+
+
+def _japanese_source(source: str, target: str) -> str | None:
+    code = _plamo_source(source)
+    if code is None or str(target).strip().lower() != "ja":
+        return None
+    return code
+
+
+def pair_supported(source: str, target: str) -> bool:
+    """True when the pair folds onto a published source code and Japanese."""
+
+    return _japanese_source(source, target) is not None
+
+
+def _plain(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    for token in _CONTROL_TOKENS:
+        text = text.replace(token, "")
+    return text.replace("\r", " ").replace("\n", " ").strip()
+
+
+def _split_glossary(lines: Iterable[Any] | None) -> tuple[tuple[GlossaryPair, ...], tuple[str, ...]]:
+    """Split extension glossary lines into explicit pairs and preserve-terms.
+
+    Both sides of `=>` are required. A bare term has no target the user wrote,
+    so the context line names that spelling.
+    """
+
+    pairs: list[GlossaryPair] = []
+    preserved: list[str] = []
+    seen_pairs: set[str] = set()
+    seen_preserved: set[str] = set()
+    for raw in lines or ():
+        text = _plain(raw)
+        if not text:
+            continue
+        if "=>" in text:
+            source, target = (part.strip() for part in text.split("=>", 1))
+            if source and target:
+                if source not in seen_pairs:
+                    seen_pairs.add(source)
+                    pairs.append(GlossaryPair(source, target))
+                continue
+        if text not in seen_preserved:
+            seen_preserved.add(text)
+            preserved.append(text)
+    return tuple(pairs), tuple(preserved)
+
+
+def _context_message(context: Iterable[Any] | None, preserved: tuple[str, ...]) -> str | None:
+    lines: list[str] = []
+    for raw in list(context or ())[-CONTEXT_TURNS:]:
+        text = _plain(raw)
+        if text:
+            lines.append(text)
+    parts: list[str] = []
+    if lines:
+        parts.append(" ".join(lines))
+    if preserved:
+        parts.append(PRESERVE_PREFIX + ", ".join(preserved))
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
+def build_pfml3(
     text: str,
     context: Iterable[Any] | None,
     glossary: Iterable[Any] | None,
     source: str,
     target: str,
-) -> list[dict[str, str]]:
-    """Build the shared prompt used by both translation implementations."""
+) -> Pfml3Prompt:
+    """Fold language codes and render one PFML3 completion string."""
 
-    recent = "\n".join(str(item) for item in (list(context or []))[-3:]) or "(none)"
-    glossary_text = "\n".join(f"- {item}" for item in (glossary or [])) or "(none)"
-    user = f"""SOURCE LANGUAGE: {source}
-TARGET LANGUAGE: {target}
-
-RECENT CONTEXT:
-{recent}
-
-GLOSSARY:
-{glossary_text}
-
-CURRENT:
-{text}"""
-    return [
-        {"role": "system", "content": TRANSLATION_SYSTEM},
-        {"role": "user", "content": user},
-    ]
+    source_code = _japanese_source(source, target)
+    if source_code is None:
+        raise ValueError(_UNSUPPORTED_PAIR)
+    pairs, preserved = _split_glossary(glossary)
+    parts = ["<|plamo:tag|>dataset<|plamo:msg|>translation"]
+    context_message = _context_message(context, preserved)
+    if context_message:
+        parts.append(f"<|plamo:tag|>context<|plamo:msg|>{context_message}")
+    if pairs:
+        rendered = "".join(
+            f"<|plamo:index|>{pair.source}<|plamo:item|>{pair.target}" for pair in pairs
+        )
+        parts.append(f"<|plamo:tag|>glossary{rendered}")
+    parts.append(
+        f"<|plamo:tag|>input<|plamo:key|>lang<|plamo:val|>{source_code}<|plamo:msg|>{_plain(text)}"
+    )
+    parts.append(
+        "<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>ja"
+        f"<|plamo:key|>form<|plamo:val|>{OUTPUT_FORM}<|plamo:msg|>"
+    )
+    return Pfml3Prompt("".join(parts))
 
 
 def clean_translation(result: str) -> str:
-    """Remove common chat labels from local model responses."""
+    """Cut a leaked stop marker, then drop one leading speaker label."""
 
     value = str(result or "").strip()
-    for prefix in ("A:", "B:", "C:", "D:"):
+    cut = len(value)
+    for marker in _STOP_MARKERS:
+        index = value.find(marker)
+        if index != -1 and index < cut:
+            cut = index
+    value = value[:cut].strip()
+    for prefix in _SPEAKER_PREFIXES:
         if value.startswith(prefix):
             return value[len(prefix):].strip()
     return value
 
 
-class MlxTranslationBackend:
-    """Lazy adapter for the existing MLX Gemma implementation."""
+def _stop_ids(tokenizer: Any) -> frozenset[int]:
+    """Keep a marker id only when the tokenizer encodes it as one token.
 
-    name = "mlx"
+    A marker that does not encode that way is still removed from the decoded
+    text by `clean_translation`.
+    """
 
-    def __init__(self, model_name: str) -> None:
-        self.model_name = model_name
-        self._model: Any = None
-        self._tokenizer: Any = None
-        self._load_lock = asyncio.Lock()
-        self._inference_lock = asyncio.Lock()
+    encode = getattr(tokenizer, "encode", None)
+    if encode is None:
+        return frozenset()
+    found: set[int] = set()
+    for marker in _STOP_MARKERS:
+        try:
+            encoded = encode(marker, add_special_tokens=False)
+        except TypeError:
+            try:
+                encoded = encode(marker)
+            except Exception:
+                continue
+        except Exception:
+            continue
+        ids = getattr(encoded, "ids", encoded)
+        if isinstance(ids, (list, tuple)) and len(ids) == 1 and isinstance(ids[0], int):
+            found.add(ids[0])
+    return frozenset(found)
 
-    @property
-    def loaded(self) -> bool:
-        return self._model is not None and self._tokenizer is not None
+
+def _completion_text(payload: Any) -> str:
+    try:
+        text = payload["choices"][0]["text"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("llama.cpp translation response did not contain choices[0].text") from exc
+    if not isinstance(text, str):
+        raise RuntimeError("llama.cpp translation response did not contain choices[0].text")
+    return text
+
+
+def _generate_mlx(
+    model: Any,
+    tokenizer: Any,
+    stream_generate: Any,
+    make_sampler: Any,
+    stop_ids: frozenset[int],
+    prompt: str,
+) -> str:
+    chunks: list[str] = []
+    for response in stream_generate(
+        model,
+        tokenizer,
+        prompt,
+        max_tokens=MAX_TOKENS,
+        sampler=make_sampler(temp=TEMPERATURE),
+    ):
+        token = getattr(response, "token", None)
+        if isinstance(token, int) and token in stop_ids:
+            break
+        piece = getattr(response, "text", "")
+        if not piece:
+            continue
+        chunks.append(piece)
+        if any(marker in "".join(chunks) for marker in _STOP_MARKERS):
+            break
+    return "".join(chunks)
+
+
+class Pfml3Translator:
+    """Build one PFML3 prompt, complete it, and clean the text."""
+
+    name: str
 
     async def translate(
         self,
@@ -80,54 +298,82 @@ class MlxTranslationBackend:
         source: str,
         target: str,
     ) -> str:
-        async with self._load_lock:
-            if not self.loaded:
-                try:
-                    from mlx_lm import load, stream_generate  # type: ignore[import-not-found]
-                    from mlx_lm.sample_utils import make_sampler  # type: ignore[import-not-found]
-                except ImportError as exc:
-                    raise RuntimeError("macOS MLX translation dependencies are missing.") from exc
-                self._model, self._tokenizer = await asyncio.to_thread(load, self.model_name)
+        prompt = build_pfml3(text, context, glossary, source, target)
+        return clean_translation(await self._complete(prompt))
 
-        messages = build_translation_messages(text, context, glossary, source, target)
+    async def _complete(self, prompt: Pfml3Prompt) -> str:
+        raise NotImplementedError
+
+
+class MlxTranslationBackend(Pfml3Translator):
+    """In-process MLX completer. Generate callables live on the instance."""
+
+    name = "mlx"
+
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+        self._model: Any = None
+        self._tokenizer: Any = None
+        self._stream_generate: Any = None
+        self._make_sampler: Any = None
+        self._stop_ids: frozenset[int] = frozenset()
+        self._ready = False
+        self._load_lock = asyncio.Lock()
+        self._inference_lock = asyncio.Lock()
+
+    @property
+    def loaded(self) -> bool:
+        return self._ready
+
+    async def _ensure_loaded(self) -> None:
+        async with self._load_lock:
+            if self._ready:
+                return
+            try:
+                from mlx_lm import load, stream_generate  # type: ignore[import-not-found]
+                from mlx_lm.sample_utils import make_sampler  # type: ignore[import-not-found]
+            except ImportError as exc:
+                raise RuntimeError("macOS MLX translation dependencies are missing.") from exc
+            # Bind the callables before `_ready`. A later caption must not
+            # depend on names that were local to this first load.
+            self._stream_generate = stream_generate
+            self._make_sampler = make_sampler
+            tokenizer_config = {"trust_remote_code": True}
+            try:
+                loaded = await asyncio.to_thread(
+                    load,
+                    self.model_name,
+                    trust_remote_code=True,
+                    tokenizer_config=tokenizer_config,
+                )
+            except TypeError:
+                # Older mlx_lm rejects the top-level flag and still accepts it
+                # inside tokenizer_config.
+                loaded = await asyncio.to_thread(
+                    load,
+                    self.model_name,
+                    tokenizer_config=tokenizer_config,
+                )
+            self._model, self._tokenizer = loaded
+            self._stop_ids = _stop_ids(self._tokenizer)
+            self._ready = True
+
+    async def _complete(self, prompt: Pfml3Prompt) -> str:
+        await self._ensure_loaded()
         async with self._inference_lock:
             return await asyncio.to_thread(
-                _translate_mlx_sync,
+                _generate_mlx,
                 self._model,
                 self._tokenizer,
-                messages,
-                stream_generate,
-                make_sampler,
+                self._stream_generate,
+                self._make_sampler,
+                self._stop_ids,
+                prompt.text,
             )
 
 
-def _translate_mlx_sync(model: Any, tokenizer: Any, messages: list[dict[str, str]], stream_generate: Any, make_sampler: Any) -> str:
-    try:
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=False,
-        )
-    except TypeError:
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
-    chunks = []
-    for response in stream_generate(
-        model,
-        tokenizer,
-        prompt=prompt,
-        max_tokens=96,
-        sampler=make_sampler(temp=0.0),
-    ):
-        piece = getattr(response, "text", "")
-        if piece:
-            chunks.append(piece)
-    return clean_translation("".join(chunks))
-
-
-class LlamaCppTranslationBackend:
-    """Call a local llama.cpp server through its OpenAI-compatible endpoint."""
+class LlamaCppTranslationBackend(Pfml3Translator):
+    """POST the same prompt string to llama-server `/v1/completions`."""
 
     name = "llamacpp"
 
@@ -140,14 +386,7 @@ class LlamaCppTranslationBackend:
     def loaded(self) -> bool:
         return self._loaded
 
-    async def translate(
-        self,
-        text: str,
-        context: Iterable[Any] | None,
-        glossary: Iterable[Any] | None,
-        source: str,
-        target: str,
-    ) -> str:
+    async def _complete(self, prompt: Pfml3Prompt) -> str:
         try:
             from aiohttp import ClientSession, ClientTimeout
         except ImportError as exc:
@@ -155,23 +394,21 @@ class LlamaCppTranslationBackend:
 
         payload = {
             "model": self.model_name,
-            "messages": build_translation_messages(text, context, glossary, source, target),
-            "temperature": 0.0,
-            "max_tokens": 96,
+            "prompt": prompt.text,
+            "temperature": TEMPERATURE,
+            "max_tokens": MAX_TOKENS,
             "stream": False,
+            "stop": list(_STOP_MARKERS),
         }
         timeout = ClientTimeout(total=float(os.environ.get("YTLT_TRANSLATION_TIMEOUT", "20")))
         async with ClientSession(timeout=timeout) as client:
-            async with client.post(f"{self.url}/v1/chat/completions", json=payload) as response:
+            async with client.post(f"{self.url}/v1/completions", json=payload) as response:
                 if response.status >= 400:
-                    raise RuntimeError(f"llama.cpp translation server returned HTTP {response.status}: {await response.text()}")
+                    body = await response.text()
+                    raise RuntimeError(
+                        f"llama.cpp translation server returned HTTP {response.status}: {body}"
+                    )
                 data = await response.json()
-
-        try:
-            message = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("llama.cpp translation response did not contain choices[0].message.content") from exc
+        text = _completion_text(data)
         self._loaded = True
-        if isinstance(message, list):
-            message = "".join(str(part.get("text", "")) if isinstance(part, dict) else str(part) for part in message)
-        return clean_translation(str(message))
+        return text
