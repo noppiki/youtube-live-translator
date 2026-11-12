@@ -37,7 +37,7 @@
 これにより、翻訳文が何度も書き換わって読めない問題を抑えつつ、翻訳開始までの待ち時間も短くしています。
 
 
-YouTube Live のタブ音声をリアルタイム文字起こしし、Chrome の組み込み Translator API で翻訳字幕を動画上へ表示する Manifest V3 拡張です。
+YouTube Live のタブ音声をリアルタイム文字起こしし、英・韓・中・西・仏・独から日本語へはローカルの PLaMo 3 Translate 2B で翻訳し、それ以外は Chrome の組み込み Translator API で翻訳字幕を動画上へ表示する Manifest V3 拡張です。
 
 ## v0.4.2: 会話内容から話者名・役割を推定
 
@@ -147,7 +147,7 @@ Probably next week.
  ↓
 Parakeet → 発話ID付き字幕をすぐ表示
  ↓
-Chrome Translator → 同じ発話IDへ翻訳文を追加
+PLaMo 3 Translate（対象外・失敗時は Chrome Translator） → 同じ発話IDへ翻訳文を追加
  ↓
 Sortformer → 少し遅れて話者判定
  ↓
@@ -272,6 +272,7 @@ curl -fsSL https://raw.githubusercontent.com/noppiki/youtube-live-translator/mai
 ~/Library/Application Support/YouTubeLiveTranslator/
 ├── .venv/
 ├── server.py
+├── backends/
 ├── bin/
 │   └── fluid-bridge
 ├── fluid-bridge-src/
@@ -290,7 +291,7 @@ Windowsインストーラーは次をユーザー領域へ配置します。
 - `%LOCALAPPDATA%\YouTubeLiveTranslator\.venv` のPython 3.12環境
 - 公式Transformers版 `Qwen/Qwen3-ASR-0.6B-hf`（CUDA優先、CPU fallback）
 - llama.cppのWindows x64ランタイム（CUDA / Vulkan / CPU）
-- `google/gemma-4-E4B-it-qat-q4_0-gguf` のQ4_0翻訳モデル
+- `pfnet/plamo-3-translate-2b-GGUF` の Q4_K_M 翻訳モデル（`plamo-3-translate-2b-Q4_K_M.gguf`）
 - Chrome / Edge Native Messaging登録とログイン時自動起動
 
 インストールの確認だけを行う場合は、チェックアウトしたリポジトリのPowerShellから以下を実行できます。モデル・ランタイムはダウンロードされません。
@@ -366,7 +367,7 @@ When will it ship?
 
 ### 固有名詞・専門用語
 
-Qwen3-ASR使用時は入力内容を `context` に渡します。
+Qwen3-ASR使用時は入力内容を `context` に渡します。同じ行は翻訳時に綴りを保つヒントになります。訳語を固定する行だけ `用語 => 訳語` と書きます。カンマは区切りです。
 
 例:
 

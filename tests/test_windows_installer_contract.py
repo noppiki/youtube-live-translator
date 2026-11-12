@@ -1,7 +1,11 @@
 from pathlib import Path
 
 
-INSTALLER = (Path(__file__).parents[1] / "scripts/install-windows.ps1").read_text(encoding="utf-8")
+ROOT = Path(__file__).parents[1]
+INSTALLER = (ROOT / "scripts/install-windows.ps1").read_text(encoding="utf-8")
+START = (ROOT / "scripts/start-windows.ps1").read_text(encoding="utf-8")
+MACOS = (ROOT / "scripts/install-macos.sh").read_text(encoding="utf-8")
+LAUNCHER = (ROOT / "native-host/launcher.py").read_text(encoding="utf-8")
 
 
 def test_installer_searches_releases_with_real_windows_assets():
@@ -12,10 +16,58 @@ def test_installer_searches_releases_with_real_windows_assets():
     assert "bin-win-cuda-12\\.4-x64" in INSTALLER
 
 
-def test_installer_uses_actual_gemma_q4_filename_pattern_and_discovers_result():
-    assert "*q4_0*.gguf" in INSTALLER
+def test_installer_downloads_plamo_q4km_and_discovers_result():
+    assert "pfnet/plamo-3-translate-2b-GGUF" in INSTALLER
+    assert "plamo-3-translate-2b-Q4_K_M.gguf" in INSTALLER
+    assert "models\\plamo-3-translate-2b-GGUF" in INSTALLER
     assert 'Get-ChildItem -LiteralPath $ModelDirectory -Filter "*.gguf"' in INSTALLER
-    assert "gemma-4-E4B-it-qat-q4_0.gguf" not in INSTALLER
+    assert "*q4_0*.gguf" not in INSTALLER
+    assert "gemma" not in INSTALLER.lower()
+    for name in ("__init__.py", "asr.py", "runtime.py", "translation.py"):
+        assert name in INSTALLER
+
+
+def test_start_and_launcher_use_the_plamo_directory():
+    assert "models\\plamo-3-translate-2b-GGUF" in START
+    assert 'else { "plamo-3-translate-2b-Q4_K_M" }' in START
+    assert "gemma" not in START.lower()
+    assert "--jinja" not in START
+    assert "models/plamo-3-translate-2b-GGUF" in LAUNCHER
+    assert "gemma" not in LAUNCHER.lower()
+    assert "--jinja" not in LAUNCHER
+
+
+def test_macos_installer_copies_backends_and_warms_plamo():
+    assert "local-server/backends/" in MACOS
+    for name in ("__init__.py", "asr.py", "runtime.py", "translation.py"):
+        assert name in MACOS
+    assert "pfnet/plamo-3-translate-2b-MLX-4bit" in MACOS
+    assert "trust_remote_code=True" in MACOS
+    assert 'tokenizer_config={"trust_remote_code": True}' in MACOS
+    assert "gemma" not in MACOS.lower()
+    assert "DreamFoundries" not in MACOS
+
+
+def test_current_ui_names_plamo_not_gemma():
+    files = [
+        ROOT / "popup/popup.html",
+        ROOT / "popup/popup.js",
+        ROOT / "offscreen/offscreen.js",
+        ROOT / "manifest.json",
+        ROOT / "README.md",
+    ]
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        assert "gemma" not in text.lower(), path.name
+    offscreen = (ROOT / "offscreen/offscreen.js").read_text(encoding="utf-8")
+    assert "translateWithLocalModel" in offscreen
+    assert "localSources" in offscreen
+    assert "translateWithLocalGemma" not in offscreen
+    popup = (ROOT / "popup/popup.html").read_text(encoding="utf-8")
+    assert "pfnet/plamo-3-translate-2b-MLX-4bit" in popup
+    assert "用語 => 訳語" in popup
+    popup_js = (ROOT / "popup/popup.js").read_text(encoding="utf-8")
+    assert "pfnet/plamo-3-translate-2b-GGUF" in popup_js
 
 
 def test_installer_sets_native_host_default_registry_value_and_accelerator():

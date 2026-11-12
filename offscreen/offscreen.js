@@ -178,7 +178,7 @@ function translationGlossary() {
     .filter(Boolean);
 }
 
-async function translateWithLocalGemma(text, source, target) {
+async function translateWithLocalModel(text, source, target) {
   const controller = new AbortController();
   const timeoutMs = text.length > 500 ? 12000 : text.length > 250 ? 8000 : 5000;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -210,13 +210,10 @@ async function translateText(text, sourceLanguage) {
   const target = settings.targetLanguage || 'ja';
   if (source === target) return text;
 
-  // Gemma 4 E4B benchmarked well for English, Korean, Chinese, Spanish,
-  // French and German → Japanese. Fall back to Chrome Translator if local
-  // inference is unavailable or fails.
-  const gemmaSources = new Set(['en', 'ko', 'zh', 'es', 'fr', 'de']);
-  if (gemmaSources.has(source) && target === 'ja') {
+  const localSources = new Set(['en', 'ko', 'zh', 'es', 'fr', 'de']);
+  if (localSources.has(source) && target === 'ja') {
     try {
-      return await translateWithLocalGemma(text, source, target);
+      return await translateWithLocalModel(text, source, target);
     } catch {}
   }
 

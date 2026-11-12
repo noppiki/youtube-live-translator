@@ -22,9 +22,9 @@ function Test-Port([int]$Port) {
 
 $env:YTLT_APP_DIR = $AppDir
 $env:YTLT_TRANSLATION_URL = "http://127.0.0.1:8766"
-$modelDir = Join-Path $AppDir "models\gemma-4-E4B-it-qat-q4_0-gguf"
+$modelDir = Join-Path $AppDir "models\plamo-3-translate-2b-GGUF"
 $model = Get-ChildItem -LiteralPath $modelDir -Filter "*.gguf" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-$env:YTLT_TRANSLATION_MODEL = if ($model) { $model.FullName } else { "gemma-4-E4B-it-qat-q4_0" }
+$env:YTLT_TRANSLATION_MODEL = if ($model) { $model.FullName } else { "plamo-3-translate-2b-Q4_K_M" }
 $llama = Join-Path $AppDir "llama-cpp\llama-server.exe"
 $python = Join-Path $AppDir ".venv\Scripts\python.exe"
 $server = Join-Path $AppDir "server.py"

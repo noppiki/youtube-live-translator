@@ -122,18 +122,18 @@ async function checkLocal(showStatus = false) {
       localBadge.textContent = `接続済み · Qwen3-ASR Transformers + llama.cpp${accelerator}`;
     } else {
       localBadge.textContent = fluidReady
-        ? '接続済み · FluidAudio + Gemma 4 E4B'
-        : '接続済み · Qwen3-ASR + Gemma 4 E4B';
+        ? '接続済み · FluidAudio + PLaMo 3 Translate 2B'
+        : '接続済み · Qwen3-ASR + PLaMo 3 Translate 2B';
     }
     localBadge.className = 'badge online';
     startLocal.disabled = true;
     startLocal.textContent = '起動済み';
     if (showStatus) {
       status.textContent = IS_WINDOWS || data.os === 'windows'
-        ? `接続済み。音声認識: Qwen3-ASR Transformers、翻訳: llama.cpp / Gemma 4 E4B${data.accelerator ? `（${data.accelerator}）` : ''}。`
+        ? `接続済み。音声認識: Qwen3-ASR Transformers、翻訳: llama.cpp / PLaMo 3 Translate 2B${data.accelerator ? `（${data.accelerator}）` : ''}。`
         : fluidReady
-          ? '接続済み。自動音声認識: Qwen3-ASR優先（話者分離ON時のみFluidAudio）、翻訳: Gemma 4 E4B。'
-          : '接続済み。音声認識: Qwen3-ASR、翻訳: Gemma 4 E4B。';
+          ? '接続済み。自動音声認識: Qwen3-ASR優先（話者分離ON時のみFluidAudio）、翻訳: PLaMo 3 Translate 2B。'
+          : '接続済み。音声認識: Qwen3-ASR、翻訳: PLaMo 3 Translate 2B。';
     }
     return data;
   } catch {
@@ -231,12 +231,12 @@ function configurePlatformUI() {
     localModel.value = WINDOWS_MODELS[0].value;
   }
   translationModel.replaceChildren(Object.assign(document.createElement('option'), {
-    value: 'google/gemma-4-E4B-it-qat-q4_0-gguf',
-    textContent: 'Gemma 4 E4B Q4_0（llama.cpp・固定）'
+    value: 'pfnet/plamo-3-translate-2b-GGUF',
+    textContent: 'PLaMo 3 Translate 2B Q4_K_M（llama.cpp・固定）'
   }));
-  translationModel.value = 'google/gemma-4-E4B-it-qat-q4_0-gguf';
-  $('#translationModelHint').textContent = '英・韓・中・西・仏・独 → 日本語。Windowsではllama.cpp経由でGemma 4 E4Bを使用します。';
-  $('#installHint').textContent = 'Windows 10/11 x64用（PowerShell）。Qwen3-ASR Transformers、llama.cpp、Gemma 4 E4B、Native Messaging、ログイン時起動を準備します。初回はモデルとランタイムのダウンロードがあります。';
+  translationModel.value = 'pfnet/plamo-3-translate-2b-GGUF';
+  $('#translationModelHint').textContent = '英・韓・中・西・仏・独 → 日本語。Windowsではllama.cpp経由でPLaMo 3 Translate 2Bを使用します。';
+  $('#installHint').textContent = 'Windows 10/11 x64用（PowerShell）。Qwen3-ASR Transformers、llama.cpp、PLaMo 3 Translate 2B、Native Messaging、ログイン時起動を準備します。初回はモデルとランタイムのダウンロードがあります。';
 }
 
 async function load() {

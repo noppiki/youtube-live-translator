@@ -80,7 +80,7 @@ def _windows_translation_model() -> Path | None:
     configured = str(os.environ.get("YTLT_TRANSLATION_MODEL", "")).strip()
     if configured and Path(configured).is_file():
         return Path(configured)
-    model_dir = APP_DIR / "models/gemma-4-E4B-it-qat-q4_0-gguf"
+    model_dir = APP_DIR / "models/plamo-3-translate-2b-GGUF"
     candidates = sorted(model_dir.glob("*.gguf"))
     return candidates[0] if candidates else None
 

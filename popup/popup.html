@@ -9,7 +9,7 @@
 <body>
   <main>
     <h1>Live Translator</h1>
-    <p class="lead">YouTube LiveをローカルAIで文字起こしし、英・韓・中・西・仏・独→日はGemma 4 E4Bで文脈翻訳、その他はChrome内蔵翻訳で字幕化します。</p>
+    <p class="lead">YouTube LiveをローカルAIで文字起こしし、英・韓・中・西・仏・独→日はPLaMo 3 Translate 2Bで文脈翻訳、その他はChrome内蔵翻訳で字幕化します。</p>
 
     <label>
       音声認識
@@ -46,7 +46,7 @@
       <label id="translationModelLabel">
         翻訳モデル
         <select id="translationModel" disabled>
-          <option value="DreamFoundries/gemma-4-E4B-it-4bit">Gemma 4 E4B IT 4-bit（MLX・固定）</option>
+          <option value="pfnet/plamo-3-translate-2b-MLX-4bit">PLaMo 3 Translate 2B 4-bit（MLX・固定）</option>
         </select>
       </label>
       <p class="hint" id="translationModelHint">英・韓・中・西・仏・独 → 日本語の文脈翻訳に使用します。</p>
@@ -135,7 +135,7 @@
       <input id="translateComments" type="checkbox" checked>
       <span>コメント・ライブチャットも翻訳</span>
     </label>
-    <p class="hint">画面に表示された英語コメントだけをGemma 4 E4Bで翻訳し、原文を日本語訳に置き換えます。</p>
+    <p class="hint">画面に表示された英語コメントだけをPLaMo 3 Translate 2Bで翻訳し、原文を日本語訳に置き換えます。</p>
 
     <label class="rangeLabel">
       <span>翻訳字幕サイズ <output id="translationSizeValue">100%</output></span>
@@ -147,7 +147,7 @@
       固有名詞・専門用語
       <textarea id="domainTerms" rows="3" placeholder="OpenAI&#10;Anthropic&#10;Claude&#10;Cursor"></textarea>
     </label>
-    <p class="hint" id="domainTermsHint">Gemma 4 E4Bの翻訳用語集として利用します。Qwen3-ASR使用時は音声認識contextにも反映します。</p>
+    <p class="hint" id="domainTermsHint">1行に1語です。用語だけ書くと、その綴りを保つヒントになり、Qwen3-ASRのcontextにも渡します。訳語を固定するときだけ 用語 => 訳語 と書きます。カンマは区切りです。</p>
 
     <label id="endpointingLabel">
       Deepgram区切り
