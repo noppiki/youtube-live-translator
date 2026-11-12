@@ -35,8 +35,6 @@ _UNSUPPORTED_PAIR = (
 
 @dataclass(frozen=True)
 class SourceLanguage:
-    """One source the local route accepts, and the PLaMo code the prompt receives."""
-
     plamo: str
     aliases: frozenset[str]
     health_code: str | None
@@ -79,16 +77,12 @@ HEALTH_SOURCE_CODES = _health_codes(SOURCE_LANGUAGES)
 
 @dataclass(frozen=True)
 class GlossaryPair:
-    """An explicit `src => tgt` line. A bare term is not a pair."""
-
     source: str
     target: str
 
 
 @dataclass(frozen=True)
 class Pfml3Prompt:
-    """One completion prompt. `build_pfml3` is the constructor callers use."""
-
     text: str
 
     def __post_init__(self) -> None:
@@ -114,8 +108,6 @@ def _japanese_source(source: str, target: str) -> str | None:
 
 
 def pair_supported(source: str, target: str) -> bool:
-    """True when the pair folds onto a published source code and Japanese."""
-
     return _japanese_source(source, target) is not None
 
 
@@ -129,12 +121,6 @@ def _plain(value: Any) -> str:
 
 
 def _split_glossary(lines: Iterable[Any] | None) -> tuple[tuple[GlossaryPair, ...], tuple[str, ...]]:
-    """Split extension glossary lines into explicit pairs and preserve-terms.
-
-    Both sides of `=>` are required. A bare term has no target the user wrote,
-    so the context line names that spelling.
-    """
-
     pairs: list[GlossaryPair] = []
     preserved: list[str] = []
     seen_pairs: set[str] = set()
@@ -179,8 +165,6 @@ def build_pfml3(
     source: str,
     target: str,
 ) -> Pfml3Prompt:
-    """Fold language codes and render one PFML3 completion string."""
-
     source_code = _japanese_source(source, target)
     if source_code is None:
         raise ValueError(_UNSUPPORTED_PAIR)
@@ -205,8 +189,6 @@ def build_pfml3(
 
 
 def clean_translation(result: str) -> str:
-    """Cut a leaked stop marker, then drop one leading speaker label."""
-
     value = str(result or "").strip()
     cut = len(value)
     for marker in _STOP_MARKERS:
@@ -221,12 +203,6 @@ def clean_translation(result: str) -> str:
 
 
 def _stop_ids(tokenizer: Any) -> frozenset[int]:
-    """Keep a marker id only when the tokenizer encodes it as one token.
-
-    A marker that does not encode that way is still removed from the decoded
-    text by `clean_translation`.
-    """
-
     encode = getattr(tokenizer, "encode", None)
     if encode is None:
         return frozenset()
@@ -235,12 +211,7 @@ def _stop_ids(tokenizer: Any) -> frozenset[int]:
         try:
             encoded = encode(marker, add_special_tokens=False)
         except TypeError:
-            try:
-                encoded = encode(marker)
-            except Exception:
-                continue
-        except Exception:
-            continue
+            encoded = encode(marker)
         ids = getattr(encoded, "ids", encoded)
         if isinstance(ids, (list, tuple)) and len(ids) == 1 and isinstance(ids[0], int):
             found.add(ids[0])
@@ -280,14 +251,13 @@ def _generate_mlx(
         if not piece:
             continue
         chunks.append(piece)
-        if any(marker in "".join(chunks) for marker in _STOP_MARKERS):
+        joined = "".join(chunks)
+        if any(marker in joined for marker in _STOP_MARKERS):
             break
     return "".join(chunks)
 
 
 class Pfml3Translator:
-    """Build one PFML3 prompt, complete it, and clean the text."""
-
     name: str
 
     async def translate(
@@ -306,8 +276,6 @@ class Pfml3Translator:
 
 
 class MlxTranslationBackend(Pfml3Translator):
-    """In-process MLX completer. Generate callables live on the instance."""
-
     name = "mlx"
 
     def __init__(self, model_name: str) -> None:
@@ -334,8 +302,6 @@ class MlxTranslationBackend(Pfml3Translator):
                 from mlx_lm.sample_utils import make_sampler  # type: ignore[import-not-found]
             except ImportError as exc:
                 raise RuntimeError("macOS MLX translation dependencies are missing.") from exc
-            # Bind the callables before `_ready`. A later caption must not
-            # depend on names that were local to this first load.
             self._stream_generate = stream_generate
             self._make_sampler = make_sampler
             tokenizer_config = {"trust_remote_code": True}
@@ -373,8 +339,6 @@ class MlxTranslationBackend(Pfml3Translator):
 
 
 class LlamaCppTranslationBackend(Pfml3Translator):
-    """POST the same prompt string to llama-server `/v1/completions`."""
-
     name = "llamacpp"
 
     def __init__(self, model_name: str, url: str | None = None) -> None:
